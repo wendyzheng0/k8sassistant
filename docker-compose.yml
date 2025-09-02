@@ -1,0 +1,164 @@
+services:
+  # 前端应用
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: k8s-assistant-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - k8s-assistant-network
+    restart: unless-stopped
+
+  # Nginx 反向代理（可选）
+  nginx:
+    image: nginx:alpine
+    container_name: k8s-assistant-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - k8s-assistant-network
+    restart: unless-stopped
+
+  # MinIO for Milvus (已注释，用于 standalone 模式)
+  # minio:
+  #   image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+  #   container_name: k8s-assistant-minio
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #     MINIO_STORAGE_CLASS_STANDARD: EC:0
+  #   command: ["minio", "server", "/minio_data", "--address", ":9000", "--console-address", ":9001"]
+  #   volumes:
+  #     - minio_data:/minio_data
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+  #     interval: 30s
+  #     timeout: 20s
+  #     retries: 3
+  #   networks:
+  #     - k8s-assistant-network
+
+  # Pulsar for Milvus (已注释，用于 standalone 模式)
+  # pulsar:
+  #   image: apachepulsar/pulsar:2.10.2
+  #   container_name: k8s-assistant-pulsar
+  #   command: ["bin/pulsar", "standalone"]
+  #   ports:
+  #     - "6650:6650"
+  #     - "8080:8080"
+  #   volumes:
+  #     - pulsar_data:/pulsar/data
+  #     - pulsar_conf:/pulsar/conf
+  #   networks:
+  #     - k8s-assistant-network
+  #   healthcheck:
+  #     test: ["CMD", "bin/pulsar-admin", "brokers", "healthcheck"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Milvus 向量数据库 (已注释，用于 standalone 模式)
+  # milvus:
+  #   image: milvusdb/milvus:v2.3.4
+  #   container_name: k8s-assistant-milvus
+  #   command: ["milvus", "run", "standalone"]
+  #   environment:
+  #     ETCD_USE_EMBED: "true"
+  #     ETCD_DATA_DIR: "/var/lib/milvus/etcd"
+  #     MINIO_ADDRESS: "minio:9000"
+  #     PULSAR_ADDRESS: "pulsar://pulsar:6650"
+  #     ETCD_ADDRESS: "localhost:2379"
+  #     MILVUS_HOST: "0.0.0.0"
+  #     MILVUS_PORT: "19530"
+  #     STANDALONE_DEPLOY: "true"
+  #     MINIO_ACCESS_KEY: minioadmin
+  #     MINIO_SECRET_KEY: minioadmin
+  #   volumes:
+  #     - milvus_data:/var/lib/milvus
+  #     - milvus_logs:/var/log/milvus
+  #   ports:
+  #     - "19530:19530"
+  #     - "9091:9091"
+  #   depends_on:
+  #     minio:
+  #       condition: service_healthy
+  #     pulsar:
+  #       condition: service_healthy
+  #   networks:
+  #     - k8s-assistant-network
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # 后端 API 服务 (CPU 版本)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.cpu
+      cache_from:
+        - python:3.9-slim
+    container_name: k8s-assistant-backend
+    environment:
+      - MILVUS_MODE=embedded
+      - COLLECTION_NAME=k8s_docs
+      - VECTOR_DIM=384
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_MODEL=${LLM_MODEL}
+      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - EMBEDDING_DEVICE=cpu
+      - EMBEDDING_LOCAL_DIR=${EMBEDDING_LOCAL_DIR}
+      - EMBEDDING_CACHE_DIR=/app/.cache/huggingface
+      - HF_MIRROR_BASE_URL=${HF_MIRROR_BASE_URL}
+      - HF_OFFLINE=${HF_OFFLINE}
+      - DEBUG=False
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./hf_cache:/app/.cache/huggingface
+      - ./milvus_embedded_data:/app/milvus_data
+    # 当使用嵌入式模式时，不需要依赖Milvus
+    # depends_on:
+    #   milvus:
+    #     condition: service_healthy
+    networks:
+      - k8s-assistant-network
+    restart: unless-stopped
+
+# volumes:
+  # 当使用standalone模式时，需要map下面的盘
+  # milvus_data:
+  #   driver: local
+  # milvus_logs:
+  #   driver: local
+  # minio_data:
+  #   driver: local
+  # pulsar_data:
+  #   driver: local
+  # pulsar_conf:
+  #   driver: local
+
+
+networks:
+  k8s-assistant-network:
+    driver: bridge

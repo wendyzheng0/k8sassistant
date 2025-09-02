@@ -1,0 +1,24 @@
+# 163 Debian 镜像源配置
+
+deb http://mirrors.163.com/debian/ bullseye main non-free contrib
+deb http://mirrors.163.com/debian/ bullseye-updates main non-free contrib
+deb http://mirrors.163.com/debian/ bullseye-backports main non-free contrib
+deb http://mirrors.163.com/debian-security/ bullseye-security main non-free contrib
+
+deb-src http://mirrors.163.com/debian/ bullseye main non-free contrib
+deb-src http://mirrors.163.com/debian/ bullseye-updates main non-free contrib
+deb-src http://mirrors.163.com/debian/ bullseye-backports main non-free contrib
+deb-src http://mirrors.163.com/debian-security/ bullseye-security main non-free contrib
+
+deb http://mirrors.163.com/debian/ trixie main non-free contrib
+deb http://mirrors.163.com/debian/ trixie-updates main non-free contrib
+deb http://mirrors.163.com/debian/ trixie-backports main non-free contrib
+deb http://mirrors.163.com/debian-security/ trixie-security main non-free contrib
+
+deb-src http://mirrors.163.com/debian/ trixie main non-free contrib
+deb-src http://mirrors.163.com/debian/ trixie-updates main non-free contrib
+deb-src http://mirrors.163.com/debian/ trixie-backports main non-free contrib
+deb-src http://mirrors.163.com/debian-security/ trixie-security main non-free contrib
+
+
+
