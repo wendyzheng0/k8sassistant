@@ -38,9 +38,9 @@ async def search_documents(
     """
     try:
         if not query.strip():
-            raise HTTPException(status_code=400, detail="查询内容不能为空")
+            raise HTTPException(status_code=400, detail="Query content cannot be empty")
         
-        logger.info(f"🔍 搜索文档: {query[:50]}...")
+        logger.info(f"🔍 Searching documents: {query[:50]}...")
         
         # 将查询编码为向量
         query_embedding = embedding_service.encode(query)[0]
@@ -56,14 +56,14 @@ async def search_documents(
         for doc in similar_docs:
             search_results.append(SearchResult(
                 id=doc["id"],
-                title=doc.get("metadata", {}).get("title", "未知文档"),
+                title=doc.get("metadata", {}).get("title", "Unknown document"),
                 content=doc["content"][:200] + "..." if len(doc["content"]) > 200 else doc["content"],
                 url=doc.get("metadata", {}).get("url", ""),
                 score=doc["score"],
                 metadata=doc.get("metadata", {})
             ))
         
-        logger.info(f"✅ 搜索完成，返回 {len(search_results)} 个结果")
+        logger.info(f"✅ Search completed, returned {len(search_results)} results")
         return {
             "query": query,
             "results": search_results,
@@ -73,8 +73,8 @@ async def search_documents(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 搜索文档失败: {e}")
-        raise HTTPException(status_code=500, detail=f"搜索文档失败: {str(e)}")
+        logger.error(f"❌ Document search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Document search failed: {str(e)}")
 
 
 @router.post("/upload")
@@ -94,10 +94,10 @@ async def upload_document(
         if file_extension not in allowed_extensions:
             raise HTTPException(
                 status_code=400, 
-                detail=f"不支持的文件类型: {file_extension}"
+                detail=f"Unsupported file type: {file_extension}"
             )
         
-        logger.info(f"📤 上传文档: {file.filename}")
+        logger.info(f"📤 Uploading document: {file.filename}")
         
         # 读取文件内容
         content = await file.read()
@@ -128,10 +128,10 @@ async def upload_document(
         # 插入到向量数据库
         await milvus_service.insert_documents([document])
         
-        logger.info(f"✅ 文档上传成功: {doc_id}")
+        logger.info(f"✅ Document uploaded successfully: {doc_id}")
         
         return {
-            "message": "文档上传成功",
+            "message": "Document uploaded successfully",
             "document_id": doc_id,
             "filename": file.filename
         }
@@ -139,8 +139,8 @@ async def upload_document(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 文档上传失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文档上传失败: {str(e)}")
+        logger.error(f"❌ Document upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Document upload failed: {str(e)}")
 
 
 @router.get("/stats")
@@ -160,8 +160,8 @@ async def get_document_stats(
         }
         
     except Exception as e:
-        logger.error(f"❌ 获取文档统计失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取文档统计失败: {str(e)}")
+        logger.error(f"❌ Failed to get document statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get document statistics: {str(e)}")
 
 
 @router.delete("/{document_id}")
@@ -175,16 +175,16 @@ async def delete_document(
     try:
         await milvus_service.delete_documents([document_id])
         
-        logger.info(f"✅ 文档删除成功: {document_id}")
+        logger.info(f"✅ Document deleted successfully: {document_id}")
         
         return {
-            "message": "文档删除成功",
+            "message": "Document deleted successfully",
             "document_id": document_id
         }
         
     except Exception as e:
-        logger.error(f"❌ 文档删除失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文档删除失败: {str(e)}")
+        logger.error(f"❌ Document deletion failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Document deletion failed: {str(e)}")
 
 
 @router.get("/list")
@@ -199,7 +199,7 @@ async def list_documents(
     try:
         # TODO: 实现文档列表功能
         # 这里暂时返回空结果
-        logger.info(f"📋 获取文档列表，页码: {page}, 大小: {size}")
+        logger.info(f"📋 Getting document list, page: {page}, size: {size}")
         
         return {
             "documents": [],
@@ -209,5 +209,5 @@ async def list_documents(
         }
         
     except Exception as e:
-        logger.error(f"❌ 获取文档列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
+        logger.error(f"❌ Failed to get document list: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get document list: {str(e)}")

@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     TEMPERATURE: float = 0.7
     
     # 嵌入模型配置
-    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
     EMBEDDING_DEVICE: str = "cpu"
     # 若提供本地模型目录，则优先从本地加载（离线）
     EMBEDDING_LOCAL_DIR: str = ""
@@ -64,9 +64,10 @@ class Settings(BaseSettings):
     ALLOWED_FILE_TYPES: List[str] = [".txt", ".md", ".pdf", ".docx", ".html"]
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=ROOT_DIR / ".env",
         case_sensitive=True,
-        env_prefix=""
+        env_prefix="",
+        env_file_encoding="utf-8"
     )
 
 
@@ -75,7 +76,20 @@ settings = Settings()
 
 # 验证必要的配置
 if not settings.LLM_API_KEY:
-    raise ValueError("LLM_API_KEY must be set in environment variables or .env file")
+    import os
+    env_file_path = ROOT_DIR / ".env"
+    error_msg = f"""
+LLM_API_KEY must be set. Please check:
+
+1. Environment variable: LLM_API_KEY={os.getenv('LLM_API_KEY', 'NOT_SET')}
+2. .env file exists: {env_file_path.exists()}
+3. .env file location: {env_file_path}
+
+To fix this, either:
+- Set the environment variable: export LLM_API_KEY=your-api-key
+- Create a .env file in the project root with: LLM_API_KEY=your-api-key
+"""
+    raise ValueError(error_msg)
 
 
 def get_settings() -> Settings:

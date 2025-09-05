@@ -13,7 +13,7 @@
 </template>
 
 <script setup lang="ts">
-// 404 页面组件逻辑
+// 404 page component logic
 </script>
 
 <style scoped>

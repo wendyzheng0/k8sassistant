@@ -36,7 +36,7 @@ def get_llm_service() -> LLMService:
     return LLMService()
 
 
-@router.post("/", response_model=ChatResponse)
+@router.post("", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
     milvus_service: MilvusService = Depends(get_milvus_service),
@@ -47,7 +47,7 @@ async def chat(
     发送聊天消息并获取回复
     """
     try:
-        logger.info(f"💬 收到聊天请求: {request.message[:50]}...")
+        logger.info(f"💬 Received chat request: {request.message[:50]}...")
         
         # 生成对话ID（如果未提供）
         conversation_id = request.conversation_id or str(uuid.uuid4())
@@ -61,7 +61,7 @@ async def chat(
             top_k=5
         )
         
-        logger.info(f"🔍 找到 {len(similar_docs)} 个相关文档")
+        logger.info(f"🔍 Found {len(similar_docs)} relevant documents")
         
         # 3. 构建对话历史（如果提供）
         conversation_history = None
@@ -94,12 +94,12 @@ async def chat(
             ]
         )
         
-        logger.info(f"✅ 聊天回复生成完成，长度: {len(response_content)}")
+        logger.info(f"✅ Chat response generated, length: {len(response_content)}")
         return response
         
     except Exception as e:
-        logger.error(f"❌ 聊天处理失败: {e}")
-        raise HTTPException(status_code=500, detail=f"聊天处理失败: {str(e)}")
+        logger.error(f"❌ Chat processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
 
 
 @router.post("/stream")
@@ -113,7 +113,7 @@ async def chat_stream(
     流式聊天回复
     """
     try:
-        logger.info(f"💬 收到流式聊天请求: {request.message[:50]}...")
+        logger.info(f"💬 Received streaming chat request: {request.message[:50]}...")
         
         # 生成对话ID（如果未提供）
         conversation_id = request.conversation_id or str(uuid.uuid4())
@@ -127,7 +127,7 @@ async def chat_stream(
             top_k=5
         )
         
-        logger.info(f"🔍 找到 {len(similar_docs)} 个相关文档")
+        logger.info(f"🔍 Found {len(similar_docs)} relevant documents")
         
         # 3. 构建对话历史（如果提供）
         conversation_history = None
@@ -169,8 +169,8 @@ async def chat_stream(
                 yield "data: [DONE]\n\n"
                 
             except Exception as e:
-                logger.error(f"❌ 流式生成失败: {e}")
-                yield f"data: 错误: {str(e)}\n\n"
+                logger.error(f"❌ Streaming generation failed: {e}")
+                yield f"data: Error: {str(e)}\n\n"
         
         return StreamingResponse(
             generate_stream(),
@@ -183,8 +183,8 @@ async def chat_stream(
         )
         
     except Exception as e:
-        logger.error(f"❌ 流式聊天处理失败: {e}")
-        raise HTTPException(status_code=500, detail=f"流式聊天处理失败: {str(e)}")
+        logger.error(f"❌ Streaming chat processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Streaming chat processing failed: {str(e)}")
 
 
 @router.get("/history", response_model=ChatHistoryResponse)
@@ -199,7 +199,7 @@ async def get_chat_history(
     try:
         # TODO: 实现从数据库获取聊天历史的逻辑
         # 这里暂时返回空结果
-        logger.info(f"📚 获取聊天历史，页码: {page}, 大小: {size}")
+        logger.info(f"📚 Getting chat history, page: {page}, size: {size}")
         
         return ChatHistoryResponse(
             conversations=[],
@@ -209,8 +209,8 @@ async def get_chat_history(
         )
         
     except Exception as e:
-        logger.error(f"❌ 获取聊天历史失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取聊天历史失败: {str(e)}")
+        logger.error(f"❌ Failed to get chat history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get chat history: {str(e)}")
 
 
 @router.delete("/history/{conversation_id}")
@@ -220,10 +220,10 @@ async def delete_conversation(conversation_id: str):
     """
     try:
         # TODO: 实现删除对话的逻辑
-        logger.info(f"🗑️ 删除对话: {conversation_id}")
+        logger.info(f"🗑️ Deleting conversation: {conversation_id}")
         
-        return {"message": "对话删除成功", "conversation_id": conversation_id}
+        return {"message": "Conversation deleted successfully", "conversation_id": conversation_id}
         
     except Exception as e:
-        logger.error(f"❌ 删除对话失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除对话失败: {str(e)}")
+        logger.error(f"❌ Failed to delete conversation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete conversation: {str(e)}")

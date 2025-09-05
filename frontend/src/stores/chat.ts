@@ -5,7 +5,7 @@ import { MessageRole, MessageType } from '@/types/chat'
 import { chatAPI } from '@/api/chat'
 
 export const useChatStore = defineStore('chat', () => {
-  // 状态
+  // State
   const conversations = ref<Conversation[]>([])
   const currentConversation = ref<Conversation | null>(null)
   const messages = ref<ChatMessage[]>([])
@@ -13,14 +13,14 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false)
   const error = ref<string | null>(null)
 
-  // 导出 conversations
+  // Export conversations
   const getConversations = computed(() => conversations.value)
 
-  // 计算属性
+  // Computed properties
   const hasMessages = computed(() => messages.value.length > 0)
   const currentConversationId = computed(() => currentConversation.value?.id)
 
-  // 方法
+  // Methods
   const sendMessage = async (content: string, useStream = false) => {
     if (!content.trim()) return
 
@@ -57,7 +57,7 @@ export const useChatStore = defineStore('chat', () => {
       console.error('发送消息失败:', err)
       error.value = err instanceof Error ? err.message : '发送消息失败'
       
-      // 添加错误消息
+      // Add error message
       const errorMessage: ChatMessage = {
         id: generateId(),
         role: MessageRole.ASSISTANT,
@@ -74,7 +74,7 @@ export const useChatStore = defineStore('chat', () => {
   const sendMessageSync = async (request: ChatRequest) => {
     const response: ChatResponse = await chatAPI.sendMessage(request)
     
-    // 添加助手回复
+    // Add assistant reply
     const assistantMessage: ChatMessage = {
       id: response.messageId,
       role: MessageRole.ASSISTANT,
@@ -88,7 +88,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     messages.value.push(assistantMessage)
 
-    // 更新或创建对话
+    // Update or create conversation
     updateConversation(response.conversationId, response.content)
   }
 
@@ -100,7 +100,7 @@ export const useChatStore = defineStore('chat', () => {
       const reader = stream.getReader()
       const decoder = new TextDecoder()
 
-      // 创建助手消息占位符
+      // Create assistant message placeholder
       const assistantMessage: ChatMessage = {
         id: generateId(),
         role: MessageRole.ASSISTANT,
@@ -126,12 +126,12 @@ export const useChatStore = defineStore('chat', () => {
             const data = line.slice(6)
             
             if (data === '[DONE]') {
-              // 流结束
+              // Stream ended
               updateConversation(conversationId, fullContent)
               return
             }
 
-            // 累积内容
+            // Accumulate content
             fullContent += data
             assistantMessage.content = fullContent
           }
@@ -144,7 +144,7 @@ export const useChatStore = defineStore('chat', () => {
 
   const updateConversation = (conversationId: string, lastMessage: string) => {
     if (!currentConversation.value) {
-      // 创建新对话
+      // Create new conversation
       currentConversation.value = {
         id: conversationId,
         title: lastMessage.slice(0, 50) + (lastMessage.length > 50 ? '...' : ''),
@@ -153,7 +153,7 @@ export const useChatStore = defineStore('chat', () => {
         updatedAt: new Date().toISOString()
       }
     } else {
-      // 更新现有对话
+      // Update existing conversation
       currentConversation.value.updatedAt = new Date().toISOString()
       currentConversation.value.messages = messages.value
     }
@@ -181,19 +181,19 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   return {
-    // 状态
+    // State
     currentConversation,
     messages,
     isLoading,
     isStreaming,
     error,
     
-    // 计算属性
+    // Computed properties
     hasMessages,
     currentConversationId,
     conversations: getConversations,
     
-    // 方法
+    // Methods
     sendMessage,
     startNewConversation,
     loadConversation,

@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #     linux-headers
 
 # 复制依赖文件
-COPY requirements-cpu.txt requirements.txt
+COPY requirements.txt requirements.txt
 
 # 安装 Python 依赖 (CPU 版本，使用国内镜像源)
 RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
