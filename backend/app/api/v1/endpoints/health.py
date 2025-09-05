@@ -9,14 +9,14 @@ router = APIRouter()
 logger = get_logger("HealthAPI")
 
 
-@router.get("/")
+@router.get("")
 async def health_check():
     """
     基础健康检查
     """
     return {
         "status": "healthy",
-        "message": "K8s Assistant 服务运行正常"
+        "message": "K8s Assistant service is running normally"
     }
 
 
@@ -43,7 +43,7 @@ async def detailed_health_check(request: Request):
             else:
                 health_status["services"]["milvus"] = {
                     "status": "unavailable",
-                    "message": "Milvus 服务未初始化"
+                    "message": "Milvus service not initialized"
                 }
         except Exception as e:
             health_status["services"]["milvus"] = {
@@ -92,12 +92,12 @@ async def detailed_health_check(request: Request):
         if not all_healthy:
             health_status["status"] = "degraded"
         
-        logger.info("🔍 详细健康检查完成")
+        logger.info("🔍 Detailed health check completed")
         return health_status
         
     except Exception as e:
-        logger.error(f"❌ 健康检查失败: {e}")
-        raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}")
+        logger.error(f"❌ Health check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
 
 
 @router.get("/ready")
@@ -108,26 +108,26 @@ async def readiness_check(request: Request):
     try:
         # 检查关键服务是否就绪
         if not hasattr(request.app.state, 'milvus_service'):
-            raise HTTPException(status_code=503, detail="Milvus 服务未就绪")
+            raise HTTPException(status_code=503, detail="Milvus service not ready")
         
         # 检查集合是否存在
         try:
             stats = await request.app.state.milvus_service.get_collection_stats()
             if stats["row_count"] == 0:
-                logger.warning("⚠️ 向量数据库为空")
+                logger.warning("⚠️ Vector database is empty")
         except Exception as e:
-            raise HTTPException(status_code=503, detail=f"Milvus 连接失败: {str(e)}")
+            raise HTTPException(status_code=503, detail=f"Milvus connection failed: {str(e)}")
         
         return {
             "status": "ready",
-            "message": "服务已就绪"
+            "message": "Service is ready"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 就绪检查失败: {e}")
-        raise HTTPException(status_code=503, detail=f"服务未就绪: {str(e)}")
+        logger.error(f"❌ Readiness check failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Service not ready: {str(e)}")
 
 
 @router.get("/live")
@@ -137,5 +137,5 @@ async def liveness_check():
     """
     return {
         "status": "alive",
-        "message": "服务存活"
+        "message": "Service is alive"
     }

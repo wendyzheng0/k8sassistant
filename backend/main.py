@@ -22,22 +22,22 @@ async def lifespan(app: FastAPI):
     # 启动时初始化
     logger = setup_logging()
     app.state.logger = logger
-    app.state.logger.info("🚀 K8s Assistant 启动中...")
+    app.state.logger.info("🚀 K8s Assistant starting...")
     
     # 初始化 Milvus 连接
     try:
         app.state.milvus_service = MilvusService()
         await app.state.milvus_service.initialize()
-        app.state.logger.info("✅ Milvus 连接初始化成功")
+        app.state.logger.info("✅ Milvus connection initialized successfully")
     except Exception as e:
-        app.state.logger.error(f"❌ Milvus 连接初始化失败: {e}")
+        app.state.logger.error(f"❌ Failed to initialize Milvus connection: {e}")
     
     yield
     
     # 关闭时清理
     if hasattr(app.state, 'milvus_service'):
         await app.state.milvus_service.close()
-    app.state.logger.info("👋 K8s Assistant 已关闭")
+    app.state.logger.info("👋 K8s Assistant closed")
 
 
 def create_app() -> FastAPI:
@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
-        description="基于 RAG 的 Kubernetes 智能问答助手",
+        description="Kubernetes intelligent Q&A assistant based on RAG",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan

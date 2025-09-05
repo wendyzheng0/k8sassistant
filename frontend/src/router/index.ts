@@ -41,9 +41,9 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫
+// Route guard
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
+  // Set page title
   if (to.meta?.title) {
     document.title = `${to.meta.title} - K8s Assistant`
   }

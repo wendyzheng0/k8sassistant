@@ -6,7 +6,7 @@
 </template>
 
 <script setup lang="ts">
-// 文档管理组件逻辑
+// Document management component logic
 </script>
 
 <style scoped>

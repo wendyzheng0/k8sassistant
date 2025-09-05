@@ -33,6 +33,7 @@ def load_documents(
     if os.path.isdir(source_path):
         for root, _dirs, files in os.walk(source_path):
             for file in files:
+                print(f"process {file_path}")
                 file_path = os.path.join(root, file)
                 try:
                     docs = parser.load_data(file_path)

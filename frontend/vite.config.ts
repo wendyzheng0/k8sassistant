@@ -33,6 +33,9 @@ export default defineConfig({
       }
     }
   },
+  preview: {
+    allowedHosts: ['direct.virtaicloud.com']
+  },
   build: {
     outDir: 'dist',
     sourcemap: false,

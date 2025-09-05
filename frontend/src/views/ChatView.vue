@@ -1,6 +1,6 @@
 <template>
   <div class="chat-container">
-    <!-- 侧边栏 -->
+    <!-- Sidebar -->
     <div class="sidebar">
       <div class="sidebar-header">
         <h2>K8s Assistant</h2>
@@ -32,9 +32,9 @@
       </div>
     </div>
 
-    <!-- 主聊天区域 -->
+    <!-- Main chat area -->
     <div class="main-content">
-      <!-- 聊天消息区域 -->
+      <!-- Chat messages area -->
       <div class="chat-messages" ref="messagesContainer">
         <div v-if="!hasMessages" class="empty-state">
           <el-icon size="64" color="#909399"><ChatDotRound /></el-icon>
@@ -77,7 +77,7 @@
               </div>
               <div class="message-text" v-html="formatMessage(message.content)"></div>
               
-              <!-- 显示来源 -->
+              <!-- Show sources -->
               <div v-if="message.metadata?.sources?.length" class="message-sources">
                 <el-collapse>
                   <el-collapse-item title="参考来源" name="sources">
@@ -105,7 +105,7 @@
             </div>
           </div>
 
-          <!-- 加载状态 -->
+          <!-- Loading state -->
           <div v-if="isLoading || isStreaming" class="message message-assistant">
             <div class="message-avatar">
               <el-avatar :icon="Service" :size="32" />
@@ -123,7 +123,7 @@
         </div>
       </div>
 
-      <!-- 输入区域 -->
+      <!-- Input area -->
       <div class="chat-input">
         <div class="input-container">
           <el-input
@@ -181,7 +181,7 @@ const chatStore = useChatStore()
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement>()
 
-// 示例问题
+// Example questions
 const exampleQuestions = [
   '如何创建一个 Kubernetes Pod？',
   '什么是 Deployment？',
@@ -190,7 +190,7 @@ const exampleQuestions = [
   '如何查看集群状态？'
 ]
 
-// 计算属性
+// Computed properties
 const messages = computed(() => chatStore.messages)
 const hasMessages = computed(() => chatStore.hasMessages)
 const isLoading = computed(() => chatStore.isLoading)
@@ -198,7 +198,7 @@ const isStreaming = computed(() => chatStore.isStreaming)
 const currentConversationId = computed(() => chatStore.currentConversationId)
 const conversations = computed(() => chatStore.conversations)
 
-// 方法
+// Methods
 const handleSend = async () => {
   if (!inputMessage.value.trim() || isLoading.value) return
   
@@ -254,12 +254,12 @@ const formatMessage = (content: string) => {
   }
 }
 
-// 监听消息变化，自动滚动到底部
+// Watch message changes, auto scroll to bottom
 watch(messages, () => {
   scrollToBottom()
 }, { deep: true })
 
-// 组件挂载后滚动到底部
+// Scroll to bottom after component mount
 onMounted(() => {
   scrollToBottom()
 })

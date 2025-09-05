@@ -6,7 +6,7 @@
 </template>
 
 <script setup lang="ts">
-// 系统设置组件逻辑
+// System settings component logic
 </script>
 
 <style scoped>

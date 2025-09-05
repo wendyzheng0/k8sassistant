@@ -62,7 +62,7 @@ RETRY_COUNT=0
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "尝试构建 (第 $((RETRY_COUNT + 1)) 次)..."
     
-    if docker-compose build --no-cache backend; then
+    if docker-compose -f docker-compose.yml build --no-cache backend; then
         echo "✅ 镜像构建成功！"
         break
     else
@@ -75,7 +75,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             echo "💡 建议："
             echo "   1. 检查网络连接"
             echo "   2. 尝试使用 VPN 或代理"
-            echo "   3. 手动构建: docker-compose build --no-cache backend"
+            echo "   3. 手动构建: docker-compose -f docker-compose.yml build --no-cache backend"
             exit 1
         fi
     fi
@@ -83,7 +83,7 @@ done
 
 # 启动服务
 echo "🚀 启动服务..."
-docker-compose up -d
+docker-compose -f docker-compose.yml up -d
 
 # 等待服务启动
 echo "⏳ 等待服务启动..."
@@ -141,5 +141,5 @@ echo "   - Milvus: http://localhost:19530"
 echo "   - 健康检查: http://localhost:8000/health"
 echo ""
 echo ""
-echo "🛑 停止服务: docker-compose down"
-echo "📋 查看日志: docker-compose logs -f"
+echo "🛑 停止服务: docker-compose -f docker-compose.yml down"
+echo "📋 查看日志: docker-compose -f docker-compose.yml logs -f"
