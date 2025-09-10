@@ -84,6 +84,12 @@ system_check() {
         
         # Check npm
         check_item "npm" "npm --version" "true" "npm package manager is required"
+    else
+        echo -e "Run following commands to install Node.js"
+        echo -e "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+        echo -e "apt-get install -y nodejs"
+        apt-get install -y nodejs
     fi
     echo ""
     
@@ -259,10 +265,10 @@ fi
 # Create necessary directories
 echo -e "${BLUE}📁 Creating necessary directories...${NC}"
 mkdir -p logs
-mkdir -p data
-mkdir -p models
 mkdir -p hf_cache
-mkdir -p milvus_embedded_data
+cd backend
+ln -s ../hf_cache hf_cache
+cd ..
 echo -e "${GREEN}✅ Directory creation completed${NC}"
 
 # Setup Python virtual environment
@@ -290,6 +296,7 @@ echo -e "${BLUE}🌐 Setting up frontend environment...${NC}"
 cd frontend
 
 if [ ! -d "node_modules" ]; then
+    npm config set registry https://registry.npmmirror.com/
     npm install
     echo -e "${GREEN}✅ Frontend dependencies installation completed${NC}"
 else
@@ -311,9 +318,12 @@ echo -e "${GREEN}🎉 Environment setup completed!${NC}"
 echo ""
 echo -e "${BLUE}📋 Next steps:${NC}"
 echo -e "1. Edit ${YELLOW}.env${NC} file and set the correct LLM_API_KEY"
-echo -e "2. Run ${YELLOW}./start-native.sh${NC} to start the service"
+echo -e "2. Run ${YELLOW}./start_milvus.sh${NC} to start the Milvus DB Server"
+echo -e "3. Run ${YELLOW}python ./data_processing/processors/dataloader.py${NC} to put documents into Milvus DB"
+echo -e "4. Run ${YELLOW}./start-native.sh${NC} to start the service"
 echo ""
 echo -e "${BLUE}📚 Common commands:${NC}"
+echo -e "   - Start Milvus DB Server: ${YELLOW}./start_milvus.sh${NC}"
 echo -e "   - Start service: ${YELLOW}./start-native.sh${NC}"
 echo -e "   - Stop service: ${YELLOW}./stop-native.sh${NC}"
 echo -e "   - View logs: ${YELLOW}tail -f logs/app.log${NC}"

@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # 嵌入模型配置
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
     EMBEDDING_DEVICE: str = "cpu"
+    EMBEDDING_BACKEND: str = "torch"
     # 若提供本地模型目录，则优先从本地加载（离线）
     EMBEDDING_LOCAL_DIR: str = ""
     # 可选：指定模型缓存目录（传给 SentenceTransformer 的 cache_folder）
@@ -54,7 +55,6 @@ class Settings(BaseSettings):
     HF_OFFLINE: bool = False
     
     # 数据处理配置
-    DATA_DIR: Path = ROOT_DIR / "data"
     DOCS_DIR: Path = ROOT_DIR / "docs"
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
@@ -62,6 +62,24 @@ class Settings(BaseSettings):
     # 文件上传配置
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_FILE_TYPES: List[str] = [".txt", ".md", ".pdf", ".docx", ".html"]
+    
+    # GraphRAG 配置
+    GRAPH_STORAGE_TYPE: str = "networkx"  # "networkx" 或 "neo4j"
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "password"
+    
+    # 图构建配置
+    GRAPH_CONFIDENCE_THRESHOLD: float = 0.5
+    GRAPH_BATCH_SIZE: int = 100
+    MAX_ENTITIES_PER_DOC: int = 50
+    MAX_RELATIONSHIPS_PER_DOC: int = 100
+    
+    # 混合检索配置
+    DEFAULT_VECTOR_WEIGHT: float = 0.6
+    DEFAULT_GRAPH_WEIGHT: float = 0.4
+    MAX_GRAPH_DEPTH: int = 3
+    ENTITY_BOOST_FACTOR: float = 1.2
     
     model_config = SettingsConfigDict(
         env_file=ROOT_DIR / ".env",

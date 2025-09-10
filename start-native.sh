@@ -60,10 +60,7 @@ fi
 # Create necessary directories
 echo -e "${BLUE}Creating necessary directories...${NC}"
 mkdir -p logs
-mkdir -p data
-mkdir -p models
 mkdir -p hf_cache
-mkdir -p milvus_embedded_data
 
 # Set environment variables
 export MILVUS_MODE=${MILVUS_MODE:-embedded}
@@ -170,7 +167,6 @@ fi
 echo -e "   - API Documentation: ${GREEN}http://localhost:8000/docs${NC}"
 echo ""
 echo -e "${BLUE}Data Storage:${NC}"
-echo -e "   - Milvus Data: ${YELLOW}./milvus_embedded_data/${NC}"
 echo -e "   - Model Cache: ${YELLOW}./hf_cache/${NC}"
 echo -e "   - Application Logs: ${YELLOW}./logs/${NC}"
 echo ""

@@ -71,6 +71,7 @@ echo INFO: Copying startup scripts...
 copy "%PROJECT_ROOT%\start-native.sh" "%PACKAGE_DIR%\"
 copy "%PROJECT_ROOT%\setup-native.sh" "%PACKAGE_DIR%\"
 copy "%PROJECT_ROOT%\stop-native.sh" "%PACKAGE_DIR%\"
+copy "%PROJECT_ROOT%\start_milvus.py" "%PACKAGE_DIR%\"
 
 REM Copy environment configuration template
 echo INFO: Copying environment configuration template...

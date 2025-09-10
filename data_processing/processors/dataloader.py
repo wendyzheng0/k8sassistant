@@ -12,6 +12,8 @@ from llama_index.core import SimpleDirectoryReader, Document
 from llama_index.core import Settings
 from llama_index.core.readers.base import BaseReader
 from llama_index.core.node_parser import HTMLNodeParser
+from llama_index.core.ingestion import IngestionPipeline
+from llama_index.core.extractors import TitleExtractor, KeywordExtractor
 from llama_index.core import (
     VectorStoreIndex, 
     SimpleDirectoryReader, 
@@ -21,12 +23,13 @@ from llama_index.core import (
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.milvus import MilvusVectorStore
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer
 from bs4 import BeautifulSoup
 from pymilvus import MilvusClient
 from huggingface_hub import snapshot_download
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from milvus_lite.server import Server
+import data_cleaner
 
 
 if os.path.exists('../../.env'):
@@ -47,7 +50,9 @@ def init_embed_model():
     hf_base_url = os.getenv("HUGGINGFACE_HUB_BASE_URL", "https://hf-mirror.com")
     model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     device = os.getenv("EMBEDDING_DEVICE", "cpu")
+    backend = os.getenv("EMBEDDING_BACKEND", "torch")  # torch, onnx, openvino
     cache_dir = os.getenv("EMBEDDING_CACHE_DIR", "hf_cache")
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'hf_cache')
     
     # 初始化嵌入模型
     model_path = model_name
@@ -71,10 +76,57 @@ def init_embed_model():
     print(f"Create embedding model")
     print(f"model_path: {model_path}")
     print(f"device: {device}")
-    Settings.embed_model = HuggingFaceEmbedding(
-        model_name=model_path,
-        device=device
-    )
+    print(f"backend: {backend}")
+    
+    # 根据后端类型初始化模型
+    if backend == "onnx":
+        # ONNX后端配置
+        model_kwargs = {}
+        
+        # 根据设备选择执行提供者
+        if device == "cuda":
+            try:
+                import onnxruntime as ort
+                providers = ort.get_available_providers()
+                if 'CUDAExecutionProvider' in providers:
+                    model_kwargs["provider"] = "CUDAExecutionProvider"
+                    print("Using CUDA ONNX execution provider")
+                else:
+                    print("CUDA execution provider not available, falling back to CPU")
+                    model_kwargs["provider"] = "CPUExecutionProvider"
+            except Exception as e:
+                print(f"Error checking CUDA providers: {e}, falling back to CPU")
+                model_kwargs["provider"] = "CPUExecutionProvider"
+        else:
+            # CPU模式，强制使用CPU执行提供者
+            model_kwargs["provider"] = "CPUExecutionProvider"
+            print("Using CPU ONNX execution provider")
+        
+        # 检查ONNX模型路径
+        onnx_path = os.path.join(model_path, "onnx")
+        if not os.path.exists(onnx_path):
+            print(f"ONNX model path not found: {onnx_path}")
+            print("Falling back to PyTorch backend")
+            # 回退到PyTorch后端
+            Settings.embed_model = HuggingFaceEmbedding(
+                model_name=model_path,
+                device=device,
+                backend="torch"
+            )
+        else:
+            Settings.embed_model = HuggingFaceEmbedding(
+                model_name=onnx_path,
+                device=device,
+                backend="onnx",
+                model_kwargs=model_kwargs
+            )
+    else:
+        # PyTorch后端（默认）
+        Settings.embed_model = HuggingFaceEmbedding(
+            model_name=model_path,
+            device=device,
+            backend="torch"
+        )
 
 
 def init_llm():
@@ -125,8 +177,7 @@ def cache_md(original_filename, md_content, data_dir, md_cache):
     with open(cache_path, 'w') as file:
         file.write(md_content)
 
-
-def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
+def init_vector_store(db_uri):
     # 创建 MilvusVectorStore 实例
     # 动态推断向量维度以匹配当前嵌入模型
     try:
@@ -146,6 +197,23 @@ def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
     print(f"📊 Collection name: {vector_store.collection_name}")
     print(f"🔗 Connection URI: {db_uri}")
     print(f"📏 Vector dimension: {inferred_dim}")
+    return vector_store
+
+# process single document with html2text
+def process_doc_html2text(doc, data_dir, md_cache):
+    h = html2text.HTML2Text()
+    h.ignore_links = True
+    soup = BeautifulSoup(doc.text, "html.parser")
+    content = soup.find("div", class_="td-content")
+    processed_content = h.handle(str(content))
+    cache_md(doc.metadata['file_path'], processed_content, data_dir, md_cache)
+    print(f"Processed file: {doc.metadata['file_path']}")
+    # Document 的 text 属性是只读的，需新建对象并保留元数据
+    processed_doc = Document(text=processed_content, metadata=doc.metadata or {})
+    return processed_doc
+
+def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
+    vector_store = init_vector_store(db_uri)
 
     exclude_files = [os.path.join(data_dir, "_print", "index.html")]
 
@@ -160,8 +228,6 @@ def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
 
     md_docs = []
     processed_files = 0
-    h = html2text.HTML2Text()
-    h.ignore_links = True
 
     print("Starting iterative loading:")
     for docs in reader_iter.iter_data():
@@ -169,13 +235,7 @@ def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
         processed_docs = []
         for doc in docs:
             # 在这里可以进行实时处理，比如数据清洗、分析等
-            soup = BeautifulSoup(doc.text, "html.parser")
-            content = soup.find("div", class_="td-content")
-            processed_content = h.handle(str(content))
-            cache_md(doc.metadata['file_path'], processed_content, data_dir, md_cache)
-            print(f"Processed file: {doc.metadata['file_path']}")
-            # Document 的 text 属性是只读的，需新建对象并保留元数据
-            processed_doc = Document(text=processed_content, metadata=doc.metadata or {})
+            processed_doc = process_doc_html2text(doc, data_dir, md_cache)
             processed_docs.append(processed_doc)
             
         md_docs.extend(processed_docs)
@@ -196,6 +256,71 @@ def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
 
     print("✅ Vector index construction completed!")
     print(f"📖 Indexed {len(md_docs)} documents")
+    return index
+
+
+
+def process_with_html_parser(data_dir, db_uri):
+    # Initialize
+    vector_store = init_vector_store(db_uri)
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+    # Define transformations
+    transformations = [
+        HTMLNodeParser(
+            tags=["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "section", "div", "article", "main"],
+            include_metadata=True,
+            include_prev_next_rel=True
+        ),
+        # These extractors depends on LLM, so we disable them
+        # TitleExtractor(),
+        # KeywordExtractor(keywords=3),
+    ]
+
+    # Create ingestion pipeline
+    pipeline = IngestionPipeline(transformations=transformations)
+
+    print(f"Going to load data from {data_dir}")
+    exclude_files = [os.path.join(data_dir, "_print", "index.html")]
+    reader = SimpleDirectoryReader(
+        input_dir=data_dir, 
+        required_exts=[".html"],
+        exclude=exclude_files,
+        recursive=True
+    )
+
+    batch_nodes = []
+    processed_files = 0
+
+    for docs in reader.iter_data():
+        for doc in docs:
+            # processed_doc = preprocess_html_document(doc)
+            processed_doc = data_cleaner.preprocess_html_document_safe(doc)
+            nodes = pipeline.run(documents=[processed_doc])
+            batch_nodes.extend(nodes)
+            processed_files += 1
+            # print(f"📊 HTML解析得到 {len(nodes)} 个节点")
+            # for i, node in enumerate(nodes):
+            #     print(f"节点 {i+1}: {node.text.strip()[:60]}...")
+            # print(f"Process file {processed_files}: {docs[0].metadata.get('file_path', 'unknown')} -> {len(nodes)} nodes")
+
+    print(f"Process {processed_files} files, cleaning and validating {len(batch_nodes)} nodes...")
+    # Clean and validate nodes before creating index
+    valid_nodes = data_cleaner.clean_and_validate_nodes(batch_nodes, min_text_length=10)
+    
+    if not valid_nodes:
+        raise ValueError("No valid nodes found for index creation")
+    
+    # Create index from the processed nodes
+    print(f"\n📥 Starting to build vector index from {len(valid_nodes)} nodes...")
+    index = VectorStoreIndex(
+        nodes=valid_nodes,
+        storage_context=storage_context,
+        show_progress=True
+    )
+
+    print("✅ Vector index construction completed!")
+    print(f"📖 Indexed {len(batch_nodes)} nodes")
     return index
 
 
@@ -241,7 +366,8 @@ def main():
         print(f"🗄️ Milvus data path: {args.milvus_data}")
         print(f"🔗 Database URI: {args.db_uri}")
         
-        index = process(args.data_dir, args.md_cache, args.db_uri)
+        # index = process(args.data_dir, args.md_cache, args.db_uri)
+        index = process_with_html_parser(args.data_dir, args.db_uri)
         
         # 确保资源正确清理
         if index is not None:
