@@ -5,7 +5,7 @@ Milvus vector database service
 import asyncio
 import os
 from typing import List, Dict, Any, Optional
-from pymilvus import MilvusClient, connections, Collection
+from pymilvus import MilvusClient, connections, Collection, CollectionSchema, FieldSchema, DataType
 from urllib.parse import urlparse
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -111,38 +111,22 @@ class MilvusService:
             collections = self.client.list_collections()
             
             if self.collection_name not in collections:
-                # 创建集合
-                schema = {
-                    "fields": [
-                        {
-                            "name": "id",
-                            "dtype": "VARCHAR",
-                            "max_length": 65535,
-                            "is_primary": True
-                        },
-                        {
-                            "name": "content",
-                            "dtype": "VARCHAR",
-                            "max_length": 65535
-                        },
-                        {
-                            "name": "metadata",
-                            "dtype": "JSON"
-                        },
-                        {
-                            "name": "embedding",
-                            "dtype": "FLOAT_VECTOR",
-                            "dim": self.vector_dim
-                        }
-                    ],
-                    "description": "Kubernetes 文档向量存储"
-                }
+                # 创建集合 - 使用 CollectionSchema 对象而不是字典
+                fields = [
+                    FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=65535, is_primary=True),
+                    FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
+                    FieldSchema(name="metadata", dtype=DataType.JSON),
+                    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self.vector_dim)
+                ]
+                
+                schema = CollectionSchema(
+                    fields=fields,
+                    description="Kubernetes 文档向量存储"
+                )
                 
                 self.client.create_collection(
                     collection_name=self.collection_name,
-                    schema=schema,
-                    properties={"collection.ttl.seconds": 0},
-                    dimension=self.vector_dim
+                    schema=schema
                 )
                 
                 # 创建索引（使用 ORM 接口，因为 MilvusClient 2.3.4 无 create_index 方法）
@@ -290,7 +274,7 @@ class MilvusService:
             
             # 格式化结果
             search_results = []
-            self.logger.info(f"Search results: {results}")
+            # self.logger.info(f"Search results: {results}")
             
             # 检查结果是否为空或无效
             if not results or len(results) == 0:
@@ -325,8 +309,12 @@ class MilvusService:
                 elif isinstance(result, dict):
                     metadata = result.get("metadata", {})
                 
+                file_path = entity.get("file_path", "unknown")
+                file_path = file_path.split('zh-cn')[1]
                 search_results.append({
                     "id": result.get("id", "unknown"),
+                    "doc_id": entity.get("doc_id", "unknown"),
+                    "file_path": file_path,
                     "content": content,
                     "metadata": metadata,
                     "score": similarity_score,
@@ -335,6 +323,7 @@ class MilvusService:
                 })
             
             self.logger.info(f"🔍 Search completed, returned {len(search_results)} results")
+            self.logger.info(f"Search results: {search_results}")
             return search_results
             
         except Exception as e:

@@ -86,7 +86,9 @@ async def chat(
             timestamp=datetime.utcnow(),
             sources=[
                 {
-                    "title": doc.get("metadata", {}).get("title", "未知文档"),
+                    "title": doc.get("file_path", "unknown"),
+                    "doc_id": doc.get("doc_id", "unknown"),
+                    "content": doc.get("content", "unknown"),
                     "url": doc.get("metadata", {}).get("url", ""),
                     "score": doc.get("score", 0)
                 }
