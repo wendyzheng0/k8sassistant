@@ -173,7 +173,7 @@ class LLMService:
 请开始回答用户的问题。"""
     
     def _build_context_text(self, context_docs: List[Dict[str, Any]]) -> str:
-        """构建上下文文本"""
+        """构建上下文文本，恢复代码块"""
         if not context_docs:
             return "没有找到相关的文档内容。"
         
@@ -185,17 +185,60 @@ class LLMService:
             content = doc.get("content", "")
             url = doc.get("url", "")
             score = doc.get("score", 0)
+            metadata = doc.get("metadata", {})
+            
+            # 恢复代码块
+            restored_content = self._restore_code_blocks(content, metadata)
             
             context_part = f"文档 {i}: {file_path}\n"
             context_part += f"相关度: {score:.3f}\n"
             if url:
                 context_part += f"来源: {url}\n"
-            context_part += f"内容: {content}\n"
+            context_part += f"内容: {restored_content}\n"
             context_part += "-" * 50
             
             context_parts.append(context_part)
         
         return "\n\n".join(context_parts)
+    
+    def _restore_code_blocks(self, content: str, metadata: Dict[str, Any]) -> str:
+        """
+        恢复文档中的代码块
+        
+        Args:
+            content: 文档内容
+            metadata: 文档元数据
+            
+        Returns:
+            恢复代码块后的内容
+        """
+        if not content or not metadata:
+            return content
+        
+        # 获取代码块信息
+        code_blocks = metadata.get('code_blocks', [])
+        if not code_blocks:
+            return content
+        
+        restored_content = content
+        
+        # 查找并替换代码标记
+        import re
+        code_marker_pattern = r'\[代码示例:\s*([^\]]+)\]'
+        
+        def replace_code_marker(match):
+            language = match.group(1)
+            # 查找对应的代码块
+            for code_block in code_blocks:
+                if code_block.get('language') == language:
+                    code_content = code_block.get('content', '')
+                    if code_content:
+                        return f"\n```{language}\n{code_content}\n```\n"
+            return match.group(0)  # 如果找不到对应的代码块，保持原样
+        
+        restored_content = re.sub(code_marker_pattern, replace_code_marker, restored_content)
+        
+        return restored_content
     
     def _build_user_message(self, query: str, context_text: str) -> str:
         """构建用户消息"""

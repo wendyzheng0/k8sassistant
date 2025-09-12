@@ -182,7 +182,7 @@ def validate_node(node: Any, min_text_length: int = 10) -> bool:
 
 def clean_and_validate_nodes(nodes: List[Any], min_text_length: int = 10) -> List[Any]:
     """
-    清理和验证节点列表
+    清理和验证节点列表，并关联代码块
     
     Args:
         nodes: 原始节点列表
@@ -200,6 +200,9 @@ def clean_and_validate_nodes(nodes: List[Any], min_text_length: int = 10) -> Lis
         try:
             # 清理节点
             cleaned_node = clean_node(node)
+            
+            # 关联代码块到节点
+            cleaned_node = associate_codes_with_node(cleaned_node)
             
             # 验证节点
             if validate_node(cleaned_node, min_text_length):
@@ -219,6 +222,59 @@ def clean_and_validate_nodes(nodes: List[Any], min_text_length: int = 10) -> Lis
         print(f"   跳过了 {skipped_count} 个无效节点")
     
     return valid_nodes
+
+
+def associate_codes_with_node(node: Any) -> Any:
+    """
+    将代码块关联到节点
+    
+    Args:
+        node: 节点对象
+        
+    Returns:
+        关联了代码块的节点对象
+    """
+    if not hasattr(node, 'metadata') or not node.metadata:
+        return node
+    
+    # 检查是否有提取的代码块
+    extracted_codes = node.metadata.get('extracted_codes', [])
+    if not extracted_codes:
+        return node
+    
+    # 初始化节点的代码块列表
+    if 'code_blocks' not in node.metadata:
+        node.metadata['code_blocks'] = []
+    
+    # 检查节点文本中是否包含代码块占位符
+    node_text = getattr(node, 'text', '')
+    if not node_text:
+        return node
+    
+    # 查找节点中的代码块占位符
+    import re
+    placeholder_pattern = r'\[CODE_BLOCK:([^:]+):([^\]]+)\]'
+    matches = re.findall(placeholder_pattern, node_text)
+    
+    for code_id, preview in matches:
+        # 查找对应的代码块
+        code_block = next((code for code in extracted_codes if code['id'] == code_id), None)
+        
+        if code_block:
+            # 将代码块添加到节点的元数据中
+            node.metadata['code_blocks'].append({
+                'id': code_block['id'],
+                'content': code_block['content'],
+                'language': code_block['language'],
+                'length': code_block['length'],
+                'preview': preview
+            })
+            
+            # 从节点文本中移除占位符，替换为简短的标记
+            placeholder = f"[CODE_BLOCK:{code_id}:{preview}]"
+            node.text = node.text.replace(placeholder, f"[代码示例: {code_block['language']}]")
+    
+    return node
 
 
 def clean_html_content(html_content: str) -> str:
@@ -251,7 +307,7 @@ def clean_html_content(html_content: str) -> str:
 
 def preprocess_html_document_safe(doc: Document) -> Document:
     """
-    安全地预处理HTML文档
+    安全地预处理HTML文档，提取代码块到metadata中
     
     Args:
         doc: 原始文档对象
@@ -260,6 +316,7 @@ def preprocess_html_document_safe(doc: Document) -> Document:
         Document: 预处理后的文档对象
     """
     from bs4 import BeautifulSoup
+    from code_extractor import CodeExtractor
     
     try:
         # 确保文档文本是字符串
@@ -272,18 +329,33 @@ def preprocess_html_document_safe(doc: Document) -> Document:
         # 解析HTML
         soup = BeautifulSoup(cleaned_html, "html.parser")
         
+        # 提取代码块
+        code_extractor = CodeExtractor()
+        processed_html, extracted_codes = code_extractor.extract_code_blocks(cleaned_html)
+        
+        # 重新解析处理后的HTML
+        processed_soup = BeautifulSoup(processed_html, "html.parser")
+        
         # 尝试找到主要内容区域
-        content_div = soup.find("div", class_="td-content")
+        content_div = processed_soup.find("div", class_="td-content")
         if content_div:
-            processed_text = str(content_div)
+            # 提取纯文本，移除HTML标签
+            processed_text = content_div.get_text(separator="\n", strip=True)
         else:
-            processed_text = cleaned_html
+            # 如果没有找到特定区域，提取整个文档的纯文本
+            processed_text = processed_soup.get_text(separator="\n", strip=True)
         
         # 清理处理后的文本
         processed_text = clean_text(processed_text)
         
         # 清理元数据
         cleaned_metadata = clean_metadata(doc.metadata)
+        
+        # 将提取的代码块添加到元数据中
+        if extracted_codes:
+            cleaned_metadata['extracted_codes'] = extracted_codes
+            cleaned_metadata['code_blocks_count'] = len(extracted_codes)
+            print(f"📝 提取了 {len(extracted_codes)} 个代码块")
         
         # 创建新的文档对象
         return Document(text=processed_text, metadata=cleaned_metadata)

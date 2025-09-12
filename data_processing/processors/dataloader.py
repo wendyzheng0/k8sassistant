@@ -11,9 +11,10 @@ from dotenv import load_dotenv
 from llama_index.core import SimpleDirectoryReader, Document
 from llama_index.core import Settings
 from llama_index.core.readers.base import BaseReader
-from llama_index.core.node_parser import HTMLNodeParser
+from llama_index.core.node_parser import HTMLNodeParser, SentenceSplitter
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.extractors import TitleExtractor, KeywordExtractor
+from llama_index.core.schema import BaseNode, TextNode
 from llama_index.core import (
     VectorStoreIndex, 
     SimpleDirectoryReader, 
@@ -43,6 +44,7 @@ DEFAULT_MILVUS_DATA = "milvus_data"
 DEFAULT_START_MILVUS = False
 
 milvus_server = None
+
 
 def init_embed_model():
     # 从环境变量或配置读取设置
@@ -215,7 +217,8 @@ def process_doc_html2text(doc, data_dir, md_cache):
 def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
     vector_store = init_vector_store(db_uri)
 
-    exclude_files = [os.path.join(data_dir, "_print", "index.html")]
+    # 使用更灵活的过滤方式，过滤掉路径中包含 _print/index.html 的文件
+    exclude_files = []
 
     # 迭代式加载和处理
     print(f"Going to load data from {data_dir}")
@@ -234,6 +237,13 @@ def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
         # 处理每个文件的文档
         processed_docs = []
         for doc in docs:
+            # 过滤掉路径中包含 _print/index.html 的文件
+            if doc.metadata and 'file_path' in doc.metadata:
+                file_path = doc.metadata['file_path']
+                if '_print/index.html' in file_path:
+                    print(f"🚫 跳过文件: {file_path} (包含 _print/index.html)")
+                    continue
+            
             # 在这里可以进行实时处理，比如数据清洗、分析等
             processed_doc = process_doc_html2text(doc, data_dir, md_cache)
             processed_docs.append(processed_doc)
@@ -265,23 +275,50 @@ def process_with_html_parser(data_dir, db_uri):
     vector_store = init_vector_store(db_uri)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
+    # 从环境变量读取chunk配置
+    chunk_size = int(os.getenv("CHUNK_SIZE", "1024"))  # 默认1024，比512大一些
+    chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "100"))  # 默认100
+
+    print(f"📏 使用chunk_size: {chunk_size}, chunk_overlap: {chunk_overlap}")
+
     # Define transformations
+    # 方案1：直接使用SentenceSplitter，在文档预处理阶段已经清理了HTML
     transformations = [
-        HTMLNodeParser(
-            tags=["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "section", "div", "article", "main"],
-            include_metadata=True,
-            include_prev_next_rel=True
+        # 直接使用SentenceSplitter，按chunk_size切分
+        SentenceSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separator="\n\n"  # 使用双换行符作为分隔符
         ),
         # These extractors depends on LLM, so we disable them
         # TitleExtractor(),
         # KeywordExtractor(keywords=3),
     ]
+    
+    # 方案2：如果你想保持HTML结构，可以尝试这个配置
+    # transformations = [
+    #     # 使用HTMLNodeParser提取HTML内容
+    #     HTMLNodeParser(
+    #         tags=["body", "main", "article", "section"],  # 只使用最大的容器标签
+    #         include_metadata=True,
+    #         include_prev_next_rel=True
+    #     ),
+    #     # 自定义HTML文本提取器，清理HTML标签
+    #     HTMLTextExtractor(),
+    #     # 然后按chunk_size切分
+    #     SentenceSplitter(
+    #         chunk_size=chunk_size,
+    #         chunk_overlap=chunk_overlap,
+    #         separator="\n\n"  # 使用双换行符作为分隔符
+    #     ),
+    # ]
 
     # Create ingestion pipeline
     pipeline = IngestionPipeline(transformations=transformations)
 
     print(f"Going to load data from {data_dir}")
-    exclude_files = [os.path.join(data_dir, "_print", "index.html")]
+    # 使用更灵活的过滤方式，过滤掉路径中包含 _print/index.html 的文件
+    exclude_files = []
     reader = SimpleDirectoryReader(
         input_dir=data_dir, 
         required_exts=[".html"],
@@ -294,15 +331,27 @@ def process_with_html_parser(data_dir, db_uri):
 
     for docs in reader.iter_data():
         for doc in docs:
+            # 过滤掉路径中包含 _print/index.html 的文件
+            if doc.metadata and 'file_path' in doc.metadata:
+                file_path = doc.metadata['file_path']
+                if '_print' in file_path:
+                    print(f"🚫 跳过文件: {file_path} (包含 _print)")
+                    continue
+            
             # processed_doc = preprocess_html_document(doc)
             processed_doc = data_cleaner.preprocess_html_document_safe(doc)
             nodes = pipeline.run(documents=[processed_doc])
             batch_nodes.extend(nodes)
             processed_files += 1
-            # print(f"📊 HTML解析得到 {len(nodes)} 个节点")
-            # for i, node in enumerate(nodes):
-            #     print(f"节点 {i+1}: {node.text.strip()[:60]}...")
-            # print(f"Process file {processed_files}: {docs[0].metadata.get('file_path', 'unknown')} -> {len(nodes)} nodes")
+            
+            # 调试信息：显示前几个节点的长度
+            if processed_files <= 3:  # 只显示前3个文件的调试信息
+                print(f"📊 文件 {processed_files} 解析得到 {len(nodes)} 个节点")
+                for i, node in enumerate(nodes[:5]):  # 只显示前5个节点
+                    text_len = len(node.text.strip())
+                    print(f"  节点 {i+1}: 长度={text_len}, 内容预览: {node.text.strip()[:100]}...")
+                if len(nodes) > 5:
+                    print(f"  ... 还有 {len(nodes)-5} 个节点")
 
     print(f"Process {processed_files} files, cleaning and validating {len(batch_nodes)} nodes...")
     # Clean and validate nodes before creating index
