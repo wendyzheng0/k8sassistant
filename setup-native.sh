@@ -266,8 +266,10 @@ fi
 echo -e "${BLUE}📁 Creating necessary directories...${NC}"
 mkdir -p logs
 mkdir -p hf_cache
+mkdir -p codeblocks
 cd backend
 ln -s ../hf_cache hf_cache
+ln -s ../codeblocks codeblocks
 cd ..
 echo -e "${GREEN}✅ Directory creation completed${NC}"
 

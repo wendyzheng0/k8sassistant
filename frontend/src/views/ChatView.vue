@@ -79,28 +79,44 @@
               
               <!-- Show sources -->
               <div v-if="message.metadata?.sources?.length" class="message-sources">
-                <el-collapse>
-                  <el-collapse-item title="参考来源" name="sources">
-                    <div 
-                      v-for="source in message.metadata.sources" 
-                      :key="source.title"
-                      class="source-item"
-                    >
+                <div class="sources-header">
+                  <span class="sources-title">参考来源</span>
+                </div>
+                <div 
+                  v-for="(source, index) in message.metadata.sources" 
+                  :key="source.title"
+                  class="source-item"
+                >
+                  <div 
+                    class="source-header"
+                    @click="toggleSourceExpansion(message.id, index)"
+                  >
+                    <div class="source-title-section">
+                      <el-icon class="expand-icon" :class="{ 'expanded': isSourceExpanded(message.id, index) }">
+                        <ArrowRight />
+                      </el-icon>
                       <el-link 
                         v-if="source.url" 
                         :href="source.url" 
                         target="_blank"
                         type="primary"
+                        @click.stop
                       >
                         {{ source.title }}
                       </el-link>
-                      <span v-else>{{ source.title }}</span>
-                      <el-tag size="small" type="info">
-                        相关度: {{ (source.score * 100).toFixed(1) }}%
-                      </el-tag>
+                      <span v-else class="source-title-text">{{ source.title }}</span>
                     </div>
-                  </el-collapse-item>
-                </el-collapse>
+                    <el-tag size="small" type="info">
+                      相关度: {{ (source.score * 100).toFixed(1) }}%
+                    </el-tag>
+                  </div>
+                  <div 
+                    v-if="isSourceExpanded(message.id, index)" 
+                    class="source-content"
+                  >
+                    <div class="source-content-text">{{ source.content }}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -169,7 +185,8 @@ import {
   Service, 
   Loading, 
   Promotion, 
-  VideoPlay 
+  VideoPlay,
+  ArrowRight
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
@@ -180,6 +197,9 @@ import type { Conversation } from '@/types/chat'
 const chatStore = useChatStore()
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement>()
+
+// 展开状态管理
+const expandedSources = ref<Record<string, Set<number>>>({})
 
 // Example questions
 const exampleQuestions = [
@@ -252,6 +272,24 @@ const formatMessage = (content: string) => {
   } catch {
     return content
   }
+}
+
+// 展开/收起source的方法
+const toggleSourceExpansion = (messageId: string, sourceIndex: number) => {
+  if (!expandedSources.value[messageId]) {
+    expandedSources.value[messageId] = new Set()
+  }
+  
+  const expandedSet = expandedSources.value[messageId]
+  if (expandedSet.has(sourceIndex)) {
+    expandedSet.delete(sourceIndex)
+  } else {
+    expandedSet.add(sourceIndex)
+  }
+}
+
+const isSourceExpanded = (messageId: string, sourceIndex: number) => {
+  return expandedSources.value[messageId]?.has(sourceIndex) || false
 }
 
 // Watch message changes, auto scroll to bottom
@@ -410,16 +448,72 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.sources-header {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #606266;
+}
+
 .source-item {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.source-item:hover {
+  border-color: #c0c4cc;
+}
+
+.source-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
-  border-bottom: 1px solid #ebeef5;
+  padding: 8px 12px;
+  background-color: #fafafa;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
-.source-item:last-child {
-  border-bottom: none;
+.source-header:hover {
+  background-color: #f0f0f0;
+}
+
+.source-title-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.expand-icon {
+  transition: transform 0.2s ease;
+  color: #909399;
+}
+
+.expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.source-title-text {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.source-content {
+  padding: 12px;
+  background-color: #fff;
+  border-top: 1px solid #ebeef5;
+}
+
+.source-content-text {
+  line-height: 1.6;
+  color: #606266;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .loading-indicator {

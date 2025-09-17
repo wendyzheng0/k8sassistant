@@ -31,8 +31,6 @@ from huggingface_hub import snapshot_download
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from milvus_lite.server import Server
 import data_cleaner
-from code_extractor import CodeExtractor
-from bge_onnx_llama_wrapper import BGEOpenXEmbedding
 
 
 if os.path.exists('../../.env'):
@@ -40,7 +38,8 @@ if os.path.exists('../../.env'):
 
 # Default values
 DEFAULT_DB_URI = 'http://localhost:19530'
-DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'zh-cn-orig', 'docs')
+DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'zh-cn', 'docs')
+DEFAULT_MD_CACHE = "./md_cache"
 DEFAULT_MILVUS_DATA = "milvus_data"
 DEFAULT_START_MILVUS = False
 
@@ -51,7 +50,7 @@ def init_embed_model():
     # 从环境变量或配置读取设置
     hf_endpoint = os.getenv("HF_ENDPOINT", "https://hf-mirror.com")
     hf_base_url = os.getenv("HUGGINGFACE_HUB_BASE_URL", "https://hf-mirror.com")
-    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     device = os.getenv("EMBEDDING_DEVICE", "cpu")
     backend = os.getenv("EMBEDDING_BACKEND", "torch")  # torch, onnx, openvino
     cache_dir = os.getenv("EMBEDDING_CACHE_DIR", "hf_cache")
@@ -83,8 +82,30 @@ def init_embed_model():
     
     # 根据后端类型初始化模型
     if backend == "onnx":
+        # ONNX后端配置
+        model_kwargs = {}
+        
+        # 根据设备选择执行提供者
+        if device == "cuda":
+            try:
+                import onnxruntime as ort
+                providers = ort.get_available_providers()
+                if 'CUDAExecutionProvider' in providers:
+                    model_kwargs["provider"] = "CUDAExecutionProvider"
+                    print("Using CUDA ONNX execution provider")
+                else:
+                    print("CUDA execution provider not available, falling back to CPU")
+                    model_kwargs["provider"] = "CPUExecutionProvider"
+            except Exception as e:
+                print(f"Error checking CUDA providers: {e}, falling back to CPU")
+                model_kwargs["provider"] = "CPUExecutionProvider"
+        else:
+            # CPU模式，强制使用CPU执行提供者
+            model_kwargs["provider"] = "CPUExecutionProvider"
+            print("Using CPU ONNX execution provider")
+        
         # 检查ONNX模型路径
-        onnx_path = os.path.join(model_path, "onnx", "model.onnx")
+        onnx_path = os.path.join(model_path, "onnx")
         if not os.path.exists(onnx_path):
             print(f"ONNX model path not found: {onnx_path}")
             print("Falling back to PyTorch backend")
@@ -95,13 +116,11 @@ def init_embed_model():
                 backend="torch"
             )
         else:
-            # 使用我们的BGE ONNX包装器
-            print("Using BGE ONNX embedding model")
-            Settings.embed_model = BGEOpenXEmbedding(
-                model_path=model_path,
+            Settings.embed_model = HuggingFaceEmbedding(
+                model_name=onnx_path,
                 device=device,
-                cache_dir=cache_dir,
-                batch_size=128
+                backend="onnx",
+                model_kwargs=model_kwargs
             )
     else:
         # PyTorch后端（默认）
@@ -122,6 +141,7 @@ def init_llm():
 
 def start_milvus(milvus_data_path=DEFAULT_MILVUS_DATA, port=19530):
     global milvus_server
+    
     try:
         print("🚀 Starting Milvus server...")
         print(f"📁 Milvus data path: {milvus_data_path}")
@@ -142,11 +162,22 @@ def start_milvus(milvus_data_path=DEFAULT_MILVUS_DATA, port=19530):
             connections.disconnect("default")
         except Exception as e:
             print(f"⚠️ Milvus connection test failed: {e}")
+            
     except Exception as e:
         print(f"🔴 Milvus server startup failed: {e}")
         milvus_server = None
         raise
 
+
+def cache_md(original_filename, md_content, data_dir, md_cache):
+    rel_path = os.path.relpath(original_filename, data_dir)
+    cache_path = os.path.join(md_cache, rel_path)
+    base, ext = os.path.splitext(cache_path)
+    cache_path = base + ".md"
+    if not os.path.exists(os.path.dirname(cache_path)):
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, 'w') as file:
+        file.write(md_content)
 
 def init_vector_store(db_uri):
     # 创建 MilvusVectorStore 实例
@@ -171,144 +202,72 @@ def init_vector_store(db_uri):
     print(f"📏 Vector dimension: {inferred_dim}")
     return vector_store
 
+# process single document with html2text
+def process_doc_html2text(doc, data_dir, md_cache):
+    h = html2text.HTML2Text()
+    h.ignore_links = True
+    soup = BeautifulSoup(doc.text, "html.parser")
+    content = soup.find("div", class_="td-content")
+    processed_content = h.handle(str(content))
+    cache_md(doc.metadata['file_path'], processed_content, data_dir, md_cache)
+    print(f"Processed file: {doc.metadata['file_path']}")
+    # Document 的 text 属性是只读的，需新建对象并保留元数据
+    processed_doc = Document(text=processed_content, metadata=doc.metadata or {})
+    return processed_doc
 
-def process_with_html_parser(data_dir, db_uri):
-    # Initialize
+def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
     vector_store = init_vector_store(db_uri)
-    storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    # 从环境变量读取chunk配置
-    chunk_size = int(os.getenv("CHUNK_SIZE", "1024"))  # 默认1024，比512大一些
-    chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "100"))  # 默认100
-
-    print(f"📏 使用chunk_size: {chunk_size}, chunk_overlap: {chunk_overlap}")
-
-    # Define transformations
-    # 使用SentenceSplitter，在文档预处理阶段已经清理了HTML
-    transformations = [
-        # 直接使用SentenceSplitter，按chunk_size切分
-        SentenceSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separator="\n\n"  # 使用双换行符作为分隔符
-        ),
-        # These extractors depends on LLM, so we disable them
-        # TitleExtractor(),
-        # KeywordExtractor(keywords=3),
-    ]
-    
-    # Create ingestion pipeline
-    pipeline = IngestionPipeline(transformations=transformations)
-
-    print(f"Going to load data from {data_dir}")
     # 使用更灵活的过滤方式，过滤掉路径中包含 _print/index.html 的文件
     exclude_files = []
-    reader = SimpleDirectoryReader(
+
+    # 迭代式加载和处理
+    print(f"Going to load data from {data_dir}")
+    reader_iter = SimpleDirectoryReader(
         input_dir=data_dir, 
         required_exts=[".html"],
         exclude=exclude_files,
         recursive=True
     )
 
-    batch_nodes = []
+    md_docs = []
     processed_files = 0
-    for docs in reader.iter_data():
+
+    print("Starting iterative loading:")
+    for docs in reader_iter.iter_data():
+        # 处理每个文件的文档
+        processed_docs = []
         for doc in docs:
             # 过滤掉路径中包含 _print/index.html 的文件
             if doc.metadata and 'file_path' in doc.metadata:
                 file_path = doc.metadata['file_path']
-                if '_print' in file_path:
-                    print(f"🚫 Skip file: {file_path} (including _print)")
+                if '_print/index.html' in file_path:
+                    print(f"🚫 跳过文件: {file_path} (包含 _print/index.html)")
                     continue
-                print(f"Processing file: {file_path}")
             
-            # processed_doc = preprocess_html_document(doc)
-            processed_doc = preprocess_html_document_safe(doc)
-            nodes = pipeline.run(documents=[processed_doc])
-            batch_nodes.extend(nodes)
-            processed_files += 1
+            # 在这里可以进行实时处理，比如数据清洗、分析等
+            processed_doc = process_doc_html2text(doc, data_dir, md_cache)
+            processed_docs.append(processed_doc)
             
-            # 调试信息：显示前几个节点的长度
-            if processed_files <= 3:  # 只显示前3个文件的调试信息
-                print(f"📊 File {processed_files} is processed into {len(nodes)} 个节点")
-                for i, node in enumerate(nodes[:5]):  # 只显示前5个节点
-                    text_len = len(node.text.strip())
-                    print(f"  node {i+1}: length={text_len}, preview: {node.text.strip()[:100]}...")
-                if len(nodes) > 5:
-                    print(f"  ... There are {len(nodes)-5} more nodes")
+        md_docs.extend(processed_docs)
+        processed_files += 1
+        print(f"Processed file {processed_files} documents")
 
-    print(f"Process {processed_files} files, cleaning and validating {len(batch_nodes)} nodes...")
-    # Clean and validate nodes before creating index
-    valid_nodes = data_cleaner.clean_and_validate_nodes(batch_nodes, min_text_length=10)
-    
-    if not valid_nodes:
-        raise ValueError("No valid nodes found for index creation")
-    
-    # Create index from the processed nodes
-    print(f"\n📥 Starting to build vector index from {len(valid_nodes)} nodes...")
-    index = VectorStoreIndex(
-        nodes=valid_nodes,
-        storage_context=storage_context
+    print(f"\nLoading completed, total {len(md_docs)} documents")
+
+    # 创建存储上下文
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    # 从文档创建向量索引
+    print("\n📥 Starting to build vector index...")
+    index = VectorStoreIndex.from_documents(
+        md_docs,
+        storage_context=storage_context,
+        show_progress=True
     )
 
     print("✅ Vector index construction completed!")
-    print(f"📖 Indexed {len(batch_nodes)} nodes")
+    print(f"📖 Indexed {len(md_docs)} documents")
     return index
-
-
-def preprocess_html_document_safe(doc: Document) -> Document:
-    """
-    安全地预处理HTML文档，提取代码块到metadata中
-    
-    Args:
-        doc: 原始文档对象
-        
-    Returns:
-        Document: 预处理后的文档对象
-    """
-    try:
-        # 确保文档文本是字符串
-        if not isinstance(doc.text, str):
-            doc.text = str(doc.text)
-        
-        # 清理HTML内容
-        cleaned_html = data_cleaner.clean_html_content(doc.text)
-        
-        # 提取代码块
-        code_extractor = CodeExtractor()
-        processed_html, extracted_codes = code_extractor.extract_code_blocks(cleaned_html)
-        
-        # 重新解析处理后的HTML
-        processed_soup = BeautifulSoup(processed_html, "html.parser")
-        
-        # 尝试找到主要内容区域
-        content_div = processed_soup.find("div", class_="td-content")
-        if content_div:
-            # 提取纯文本，移除HTML标签
-            processed_text = content_div.get_text(separator="\n", strip=True)
-        else:
-            # 如果没有找到特定区域，提取整个文档的纯文本
-            processed_text = processed_soup.get_text(separator="\n", strip=True)
-        
-        # 清理处理后的文本
-        processed_text = data_cleaner.clean_text(processed_text)
-        
-        # 清理元数据
-        cleaned_metadata = data_cleaner.clean_metadata(doc.metadata)
-        
-        # 将提取的代码块添加到元数据中
-        if extracted_codes:
-            cleaned_metadata['extracted_codes'] = extracted_codes
-            cleaned_metadata['code_blocks_count'] = len(extracted_codes)
-            print(f"Extracted {len(extracted_codes)} code blocks")
-        
-        # 创建新的文档对象
-        return Document(text=processed_text, metadata=cleaned_metadata)
-        
-    except Exception as e:
-        print(f"Exception occurs when preprocessing HTML document: {e}")
-        # 如果出错，返回清理后的原始文档
-        return data_cleaner.clean_document(doc)
 
 
 def main():
@@ -316,6 +275,8 @@ def main():
     parser = argparse.ArgumentParser(description='Process HTML documents and create vector index')
     parser.add_argument('--data-dir', type=str, default=DEFAULT_DATA_DIR,
                         help=f'Path to the data directory containing HTML files (default: {DEFAULT_DATA_DIR})')
+    parser.add_argument('--md-cache', type=str, default=DEFAULT_MD_CACHE,
+                        help=f'Path to store converted markdown files (default: {DEFAULT_MD_CACHE})')
     parser.add_argument('--start-milvus', action='store_true', default=DEFAULT_START_MILVUS,
                         help='Whether to start Milvus server (default: False)')
     parser.add_argument('--milvus-data', type=str, default=DEFAULT_MILVUS_DATA,
@@ -330,6 +291,11 @@ def main():
         print(f"🔴 Error: Data directory does not exist: {args.data_dir}")
         return 1
     
+    # Create md_cache directory if it doesn't exist
+    if not os.path.exists(args.md_cache):
+        os.makedirs(args.md_cache, exist_ok=True)
+        print(f"📁 Created md_cache directory: {args.md_cache}")
+    
     try:
         print("🔧 Initializing embedding model...")
         init_embed_model()
@@ -342,9 +308,11 @@ def main():
         
         print("🔧 Starting data processing...")
         print(f"📂 Data directory: {args.data_dir}")
+        print(f"📁 MD cache directory: {args.md_cache}")
+        print(f"🗄️ Milvus data path: {args.milvus_data}")
         print(f"🔗 Database URI: {args.db_uri}")
         
-        index = process_with_html_parser(args.data_dir, args.db_uri)
+        index = process(args.data_dir, args.md_cache, args.db_uri)
         
         # 确保资源正确清理
         if index is not None:

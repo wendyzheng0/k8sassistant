@@ -61,6 +61,10 @@ echo INFO: Copying data processing module...
 mkdir "%PACKAGE_DIR%\data_processing"
 xcopy "%PROJECT_ROOT%\data_processing" "%PACKAGE_DIR%\data_processing" /E /I /Q
 
+REM Copy bge_onnx_llama_wrapper.py to backend services
+echo INFO: Copying bge_onnx_llama_wrapper.py to backend services...
+copy "%PROJECT_ROOT%\data_processing\processors\bge_onnx_llama_wrapper.py" "%PACKAGE_DIR%\backend\app\services\bge_onnx_llama_wrapper.py"
+
 REM Copy documentation
 echo INFO: Copying documentation...
 mkdir "%PACKAGE_DIR%\docs"

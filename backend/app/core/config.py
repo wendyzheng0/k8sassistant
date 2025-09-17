@@ -3,6 +3,7 @@
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -54,6 +55,9 @@ class Settings(BaseSettings):
     HF_MIRROR_BASE_URL: str = ""  # 例如: https://hf-mirror.com
     HF_OFFLINE: bool = False
     
+    # For dataloader in pipeline
+    NLTK_DATA: str = str(Path(sys.prefix) / "lib" / "nltk_data")
+
     # 数据处理配置
     DOCS_DIR: Path = ROOT_DIR / "docs"
     CHUNK_SIZE: int = 512

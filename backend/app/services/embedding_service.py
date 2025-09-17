@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from huggingface_hub import snapshot_download
+from .bge_onnx_llama_wrapper import BGEOpenXEmbedding
 
 
 class EmbeddingService:
@@ -61,9 +62,15 @@ class EmbeddingService:
             self.logger.info(f"create embedding model")
             self.logger.info(f"model_path: {model_path}")
             self.logger.info(f"device: {settings.EMBEDDING_DEVICE}")
-            self.model = HuggingFaceEmbedding(
-                model_name=model_path,
-                device=self.device
+            # self.model = HuggingFaceEmbedding(
+            #     model_name=model_path,
+            #     device=self.device
+            # )
+            print("Using BGE ONNX embedding model")
+            self.model = BGEOpenXEmbedding(
+                model_path=model_path,
+                device=self.device,
+                cache_dir=settings.EMBEDDING_CACHE_DIR
             )
 
             self.logger.info(f"✅ Embedding model loaded successfully, device: {self.device}")
