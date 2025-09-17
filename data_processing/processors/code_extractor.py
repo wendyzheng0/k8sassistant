@@ -13,6 +13,7 @@ from llama_index.core import Document
 
 class CodeExtractor:
     """代码提取器类"""
+    code_location = "../../codeblocks"
     
     def __init__(self):
         self.code_blocks = []  # 存储提取的代码块信息
@@ -42,27 +43,32 @@ class CodeExtractor:
             # 提取代码内容
             code_content = code_tag.get_text(strip=False)
             
-            if code_content and code_content.strip():
+            if code_content and len(code_content.strip()) > 500:
                 # 生成唯一的代码块ID
                 code_id = f"code_block_{uuid.uuid4().hex[:8]}"
+
+                with open(f"{self.code_location}/{code_id}.txt", "w") as f:
+                    f.write(code_content)
                 
                 # 获取代码块的位置信息
-                position_info = self._get_code_position(code_tag, soup)
+                # position_info = self._get_code_position(code_tag, soup)
                 
                 # 创建代码块信息
                 code_info = {
                     "id": code_id,
-                    "content": code_content,
+                    "path": f"{self.code_location}/{code_id}.txt",
+                    # "content": code_content,
                     "index": i,
-                    "position": position_info,
-                    "language": self._detect_language(code_tag, code_content),
+                    # "position": position_info,
+                    # "language": self._detect_language(code_tag, code_content),
                     "length": len(code_content)
                 }
                 
                 extracted_codes.append(code_info)
                 
                 # 用占位符替换原始代码标签
-                placeholder = self._create_placeholder(code_id, code_content)
+                # placeholder = self._create_placeholder(code_id, code_content)
+                placeholder = f"[CODE_BLOCK:{code_id}]"
                 code_tag.replace_with(placeholder)
         
         # 获取清理后的HTML内容
@@ -185,59 +191,8 @@ class CodeExtractor:
         
         placeholder = f"[CODE_BLOCK:{code_id}:{preview}]"
         return placeholder
-    
-    def associate_codes_with_nodes(self, nodes: List[Any], extracted_codes: List[Dict[str, Any]]) -> List[Any]:
-        """
-        将提取的代码块与分割后的节点关联
-        
-        Args:
-            nodes: 分割后的节点列表
-            extracted_codes: 提取的代码块列表
-            
-        Returns:
-            List: 关联了代码块的节点列表
-        """
-        if not extracted_codes:
-            return nodes
-        
-        # 为每个节点添加相关的代码块
-        for node in nodes:
-            if not hasattr(node, 'metadata'):
-                continue
-                
-            # 初始化代码块列表
-            if 'code_blocks' not in node.metadata:
-                node.metadata['code_blocks'] = []
-            
-            # 检查节点文本中是否包含代码块占位符
-            node_text = getattr(node, 'text', '')
-            if not node_text:
-                continue
-            
-            # 查找节点中的代码块占位符
-            placeholder_pattern = r'\[CODE_BLOCK:([^:]+):([^\]]+)\]'
-            matches = re.findall(placeholder_pattern, node_text)
-            
-            for code_id, preview in matches:
-                # 查找对应的代码块
-                code_block = next((code for code in extracted_codes if code['id'] == code_id), None)
-                
-                if code_block:
-                    # 将代码块添加到节点的元数据中
-                    node.metadata['code_blocks'].append({
-                        'id': code_block['id'],
-                        'content': code_block['content'],
-                        'language': code_block['language'],
-                        'length': code_block['length'],
-                        'preview': preview
-                    })
-                    
-                    # 从节点文本中移除占位符
-                    placeholder = f"[CODE_BLOCK:{code_id}:{preview}]"
-                    node.text = node.text.replace(placeholder, f"[代码示例: {code_block['language']}]")
-        
-        return nodes
-    
+
+
     def extract_codes_from_document(self, doc: Document) -> Tuple[Document, List[Dict[str, Any]]]:
         """
         从文档中提取代码块

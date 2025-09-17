@@ -224,16 +224,18 @@ class LLMService:
         
         # 查找并替换代码标记
         import re
-        code_marker_pattern = r'\[代码示例:\s*([^\]]+)\]'
+        # code_marker_pattern = r'\[代码示例:\s*([^\]]+)\]'
+        code_marker_pattern = r'\[CODE_BLOCK:\s*([^\]]+)\]'
         
         def replace_code_marker(match):
-            language = match.group(1)
+            codeid = match.group(1)
             # 查找对应的代码块
             for code_block in code_blocks:
-                if code_block.get('language') == language:
-                    code_content = code_block.get('content', '')
+                if code_block.get('id') == codeid:
+                    with open(code_block.get('path'), "r") as f:
+                        code_content = f.read()
                     if code_content:
-                        return f"\n```{language}\n{code_content}\n```\n"
+                        return f"\n```{code_content}\n```\n"
             return match.group(0)  # 如果找不到对应的代码块，保持原样
         
         restored_content = re.sub(code_marker_pattern, replace_code_marker, restored_content)

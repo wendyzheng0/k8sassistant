@@ -7,6 +7,9 @@
 import re
 from typing import List, Any, Dict, Union
 from llama_index.core import Document
+from bs4 import BeautifulSoup
+from code_extractor import CodeExtractor
+    
 
 
 def clean_text(text: Any) -> str:
@@ -253,27 +256,36 @@ def associate_codes_with_node(node: Any) -> Any:
     
     # 查找节点中的代码块占位符
     import re
-    placeholder_pattern = r'\[CODE_BLOCK:([^:]+):([^\]]+)\]'
+    placeholder_pattern = r'\[CODE_BLOCK:([^:]+)\]'
     matches = re.findall(placeholder_pattern, node_text)
     
-    for code_id, preview in matches:
+    for code_id in matches:
         # 查找对应的代码块
-        code_block = next((code for code in extracted_codes if code['id'] == code_id), None)
+        code_block = None
+        for code in extracted_codes:
+            # 确保code是字典类型
+            if isinstance(code, dict) and code.get('id') == code_id:
+                code_block = code
+                break
         
         if code_block:
             # 将代码块添加到节点的元数据中
             node.metadata['code_blocks'].append({
-                'id': code_block['id'],
-                'content': code_block['content'],
-                'language': code_block['language'],
-                'length': code_block['length'],
-                'preview': preview
+                'id': code_block.get('id', code_id),
+                # 'content': code_block.get('content', ''),
+                # 'language': code_block.get('language', ''),
+                'length': code_block.get('length', 0),
+                # 'preview': preview
             })
             
             # 从节点文本中移除占位符，替换为简短的标记
-            placeholder = f"[CODE_BLOCK:{code_id}:{preview}]"
-            node.text = node.text.replace(placeholder, f"[代码示例: {code_block['language']}]")
+            placeholder = f"[CODE_BLOCK:{code_id}]"
+            # node.text = node.text.replace(placeholder, f"[代码示例: {code_block.get('language', 'unknown')}]")
     
+    # 移除已处理的代码块提取信息
+    if 'extracted_codes' in node.metadata:
+        del node.metadata['extracted_codes']
+
     return node
 
 
@@ -303,64 +315,3 @@ def clean_html_content(html_content: str) -> str:
     html_content = html_content.strip()
     
     return html_content
-
-
-def preprocess_html_document_safe(doc: Document) -> Document:
-    """
-    安全地预处理HTML文档，提取代码块到metadata中
-    
-    Args:
-        doc: 原始文档对象
-        
-    Returns:
-        Document: 预处理后的文档对象
-    """
-    from bs4 import BeautifulSoup
-    from code_extractor import CodeExtractor
-    
-    try:
-        # 确保文档文本是字符串
-        if not isinstance(doc.text, str):
-            doc.text = str(doc.text)
-        
-        # 清理HTML内容
-        cleaned_html = clean_html_content(doc.text)
-        
-        # 解析HTML
-        soup = BeautifulSoup(cleaned_html, "html.parser")
-        
-        # 提取代码块
-        code_extractor = CodeExtractor()
-        processed_html, extracted_codes = code_extractor.extract_code_blocks(cleaned_html)
-        
-        # 重新解析处理后的HTML
-        processed_soup = BeautifulSoup(processed_html, "html.parser")
-        
-        # 尝试找到主要内容区域
-        content_div = processed_soup.find("div", class_="td-content")
-        if content_div:
-            # 提取纯文本，移除HTML标签
-            processed_text = content_div.get_text(separator="\n", strip=True)
-        else:
-            # 如果没有找到特定区域，提取整个文档的纯文本
-            processed_text = processed_soup.get_text(separator="\n", strip=True)
-        
-        # 清理处理后的文本
-        processed_text = clean_text(processed_text)
-        
-        # 清理元数据
-        cleaned_metadata = clean_metadata(doc.metadata)
-        
-        # 将提取的代码块添加到元数据中
-        if extracted_codes:
-            cleaned_metadata['extracted_codes'] = extracted_codes
-            cleaned_metadata['code_blocks_count'] = len(extracted_codes)
-            print(f"📝 提取了 {len(extracted_codes)} 个代码块")
-        
-        # 创建新的文档对象
-        return Document(text=processed_text, metadata=cleaned_metadata)
-        
-    except Exception as e:
-        print(f"⚠️ 预处理HTML文档时出错: {e}")
-        # 如果出错，返回清理后的原始文档
-        return clean_document(doc)

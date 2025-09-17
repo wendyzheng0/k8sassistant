@@ -4,7 +4,7 @@
 
 ## 🚀 项目概述
 
-K8s Assistant 是一个全栈的智能问答系统，集成了先进的大语言模型和向量数据库技术，专门为 Kubernetes 用户提供智能化的文档查询和问题解答服务。
+K8s Assistant 是一个全栈的智能问答系统，集成了大语言模型和向量数据库技术，专门为 Kubernetes 用户提供智能化的文档查询和问题解答服务。
 
 ## 📋 基本功能
 
@@ -16,7 +16,7 @@ K8s Assistant 是一个全栈的智能问答系统，集成了先进的大语言
   - 支持批量处理 HTML 文档
   - 自动过滤无效文件（如 `_print/index.html`）
   - 集成 Milvus 向量数据库
-  - 支持多种嵌入模型（HuggingFace、ONNX、OpenVINO）
+  - 利用ONNX加速嵌入模型(BAAI/bge-small-en-v1.5, zh版本在转换ONNX的时候出了点问题，所以用了en版)
   - 智能文档分块和向量化
   - 支持流式处理大量文档
 
@@ -33,10 +33,8 @@ K8s Assistant 是一个全栈的智能问答系统，集成了先进的大语言
 #### 代码提取器 (`code_extractor.py`)
 - **功能**: 从 HTML 文档中智能提取代码块
 - **核心特性**:
-  - 自动识别多种编程语言
   - 代码块位置信息记录
   - 代码内容完整性保护
-  - 支持 20+ 种编程语言检测
   - 代码块与文档节点智能关联
 
 ### 2. 后端服务
@@ -55,7 +53,6 @@ K8s Assistant 是一个全栈的智能问答系统，集成了先进的大语言
 - **LLM 服务** (`llm_service.py`): 大语言模型集成，支持 OpenAI 兼容接口
 - **嵌入服务** (`embedding_service.py`): 文本向量化处理
 - **Milvus 服务** (`milvus_service.py`): 向量数据库操作
-- **混合检索服务** (`hybrid_retrieval_service.py`): 多策略文档检索
 
 #### 数据处理流程
 1. **文档加载**: 从指定目录加载 HTML 文档
@@ -70,18 +67,10 @@ K8s Assistant 是一个全栈的智能问答系统，集成了先进的大语言
 
 #### 技术栈
 - **框架**: Vue 3 + TypeScript
-- **UI 库**: Element Plus
 - **构建工具**: Vite
-- **状态管理**: Pinia
-- **路由**: Vue Router
 
 #### 核心功能
 - **聊天界面**: 现代化的对话界面
-- **文档管理**: 文档上传和状态查看
-- **设置页面**: 系统配置管理
-- **响应式设计**: 支持多设备访问
-- **代码高亮**: 使用 highlight.js 美化代码显示
-- **Markdown 渲染**: 支持富文本内容展示
 
 ## 🛠️ 技术栈
 
@@ -99,20 +88,14 @@ K8s Assistant 是一个全栈的智能问答系统，集成了先进的大语言
   - html2text 2025.4.15
   - LlamaIndex 0.13.4
 - **数据处理**: 
-  - NetworkX 3.2.1 (图处理)
   - scikit-learn 1.3.2 (机器学习)
   - SciPy 1.11.4 (科学计算)
 
 ### 前端技术
 - **核心框架**: Vue 3.3.8
 - **开发语言**: TypeScript 5.2.0
-- **UI 组件库**: Element Plus 2.4.4
 - **构建工具**: Vite 5.0.0
-- **状态管理**: Pinia 2.1.7
 - **路由管理**: Vue Router 4.2.5
-- **HTTP 客户端**: Axios 1.6.2
-- **代码高亮**: highlight.js 11.9.0
-- **Markdown 渲染**: marked 9.1.6
 
 ### 部署和运维
 - **容器化**: Docker + Docker Compose
