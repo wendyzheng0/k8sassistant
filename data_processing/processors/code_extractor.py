@@ -6,6 +6,7 @@
 
 import re
 import uuid
+import os
 from typing import List, Dict, Any, Tuple, Optional
 from bs4 import BeautifulSoup, Tag
 from llama_index.core import Document
@@ -17,6 +18,12 @@ class CodeExtractor:
     
     def __init__(self):
         self.code_blocks = []  # 存储提取的代码块信息
+        # 确保代码块目录存在
+        try:
+            os.makedirs(self.code_location, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            # 如果无法创建目录，记录错误但不中断程序
+            print(f"Warning: Could not create code directory '{self.code_location}': {e}")
         
     def extract_code_blocks(self, html_content: str) -> Tuple[str, List[Dict[str, Any]]]:
         """
@@ -47,8 +54,13 @@ class CodeExtractor:
                 # 生成唯一的代码块ID
                 code_id = f"code_block_{uuid.uuid4().hex[:8]}"
 
-                with open(f"{self.code_location}/{code_id}.txt", "w") as f:
-                    f.write(code_content)
+                try:
+                    with open(f"{self.code_location}/{code_id}.txt", "w", encoding='utf-8') as f:
+                        f.write(code_content)
+                except (OSError, PermissionError) as e:
+                    print(f"Warning: Could not save code block '{code_id}': {e}")
+                    # 如果无法保存文件，跳过这个代码块
+                    continue
                 
                 # 获取代码块的位置信息
                 # position_info = self._get_code_position(code_tag, soup)

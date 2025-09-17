@@ -232,10 +232,16 @@ class LLMService:
             # 查找对应的代码块
             for code_block in code_blocks:
                 if code_block.get('id') == codeid:
-                    with open(code_block.get('path'), "r") as f:
-                        code_content = f.read()
-                    if code_content:
-                        return f"\n```{code_content}\n```\n"
+                    try:
+                        code_path = code_block.get('path')
+                        if code_path:
+                            with open(code_path, "r", encoding='utf-8') as f:
+                                code_content = f.read()
+                            if code_content:
+                                return f"\n```{code_content}\n```\n"
+                    except Exception as e:
+                        self.logger.error(f"Failed to read code block file {code_path}: {e}")
+                        return match.group(0)
             return match.group(0)  # 如果找不到对应的代码块，保持原样
         
         restored_content = re.sub(code_marker_pattern, replace_code_marker, restored_content)
