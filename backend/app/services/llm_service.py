@@ -5,6 +5,7 @@
 import asyncio
 from typing import List, Dict, Any, Optional
 import openai
+from langchain.prompts import PromptTemplate
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -26,6 +27,45 @@ class LLMService:
             base_url=self.base_url
         )
     
+    async def generate_refine_query(
+        self,
+        message: str,
+        temperature: float,
+        max_tokens: int
+    ) -> str:
+        try:
+            # 定义查询重写提示模板
+            query_rewrite_template = """
+你是一个查询优化专家。文档库里面包含了Kubernetes的技术文档。用户的原始查询可能表达不清楚或不适合检索,
+还有可能是一个复杂的问题，请将用户的查询重写为一个更清晰、更具体、更适合搜索的查询。
+
+原始查询: {original_query}
+
+重写后的查询应该:
+1. 明确具体，避免模糊表达
+2. 包含关键术语和概念
+3. 适合语义搜索
+4. 保持原始意图不变
+
+重写后的查询:
+            """
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": query_rewrite_template.format(original_query=message)}],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            
+            content = response.choices[0].message.content
+            self.logger.info(f"Original query: {message}")
+            self.logger.info(f"Rewrite query: {content}")
+            return content
+            
+        except Exception as e:
+            self.logger.error(f"❌ 同步生成回复失败: {e}")
+            raise
+
     async def generate_response(
         self,
         messages: List[Dict[str, str]],

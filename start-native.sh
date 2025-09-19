@@ -65,7 +65,6 @@ mkdir -p hf_cache
 # Set environment variables
 export MILVUS_MODE=${MILVUS_MODE:-embedded}
 export COLLECTION_NAME=${COLLECTION_NAME:-k8s_docs}
-export VECTOR_DIM=${VECTOR_DIM:-384}
 export EMBEDDING_CACHE_DIR=${EMBEDDING_CACHE_DIR:-hf_cache}
 
 echo -e "${BLUE}Setting up backend environment...${NC}"

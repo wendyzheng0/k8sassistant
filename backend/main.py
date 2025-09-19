@@ -14,6 +14,12 @@ from app.core.config import settings
 from app.core.logging import setup_logging
 from app.api.v1.api import api_router
 from app.services.milvus_service import MilvusService
+from app.services.embedding_service import EmbeddingService
+from app.services.llm_service import LLMService
+from app.services.complex_retrieval_service import ComplexRetrievalService
+from app.services.graph_construction_service import GraphConstructionService
+from app.services.hybrid_retrieval_service import HybridRetrievalService
+from app.services.enhanced_llm_service import EnhancedLLMService
 
 
 @asynccontextmanager
@@ -24,19 +30,58 @@ async def lifespan(app: FastAPI):
     app.state.logger = logger
     app.state.logger.info("🚀 K8s Assistant starting...")
     
-    # 初始化 Milvus 连接
+    # 初始化所有服务
     try:
+        # 初始化 Milvus 服务
         app.state.milvus_service = MilvusService()
         await app.state.milvus_service.initialize()
         app.state.logger.info("✅ Milvus connection initialized successfully")
+        
+        # 初始化嵌入服务
+        app.state.embedding_service = EmbeddingService()
+        app.state.logger.info("✅ Embedding service initialized successfully")
+        
+        # 初始化 LLM 服务
+        app.state.llm_service = LLMService()
+        app.state.logger.info("✅ LLM service initialized successfully")
+        
+        # 初始化复杂检索服务
+        app.state.complex_retrieval_service = ComplexRetrievalService()
+        app.state.logger.info("✅ Complex retrieval service initialized successfully")
+        
+        # # 初始化图构建服务
+        # app.state.graph_construction_service = GraphConstructionService()
+        # app.state.logger.info("✅ Graph construction service initialized successfully")
+        
+        # # 初始化混合检索服务
+        # app.state.hybrid_retrieval_service = HybridRetrievalService()
+        # app.state.logger.info("✅ Hybrid retrieval service initialized successfully")
+        
+        # # 初始化增强LLM服务
+        # app.state.enhanced_llm_service = EnhancedLLMService()
+        # app.state.logger.info("✅ Enhanced LLM service initialized successfully")
+        
     except Exception as e:
-        app.state.logger.error(f"❌ Failed to initialize Milvus connection: {e}")
+        app.state.logger.error(f"❌ Failed to initialize services: {e}")
+        raise
     
     yield
     
     # 关闭时清理
     if hasattr(app.state, 'milvus_service'):
         await app.state.milvus_service.close()
+    if hasattr(app.state, 'embedding_service'):
+        del app.state.embedding_service
+    if hasattr(app.state, 'llm_service'):
+        del app.state.llm_service
+    if hasattr(app.state, 'complex_retrieval_service'):
+        del app.state.complex_retrieval_service
+    if hasattr(app.state, 'graph_construction_service'):
+        del app.state.graph_construction_service
+    if hasattr(app.state, 'hybrid_retrieval_service'):
+        del app.state.hybrid_retrieval_service
+    if hasattr(app.state, 'enhanced_llm_service'):
+        del app.state.enhanced_llm_service
     app.state.logger.info("👋 K8s Assistant closed")
 
 

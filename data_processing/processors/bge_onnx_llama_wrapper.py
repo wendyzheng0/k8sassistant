@@ -226,7 +226,7 @@ class BGEOpenXEmbedding(BaseEmbedding):
                         "gpu_mem_limit": gpu_memory_limit,  # Use optimal memory limit
                         "cudnn_conv_algo_search": "EXHAUSTIVE",  # Better performance for large GPUs
                         "do_copy_in_default_stream": True,
-                        "enable_cuda_graph": True,  # Enable for better performance on large GPUs
+                        "enable_cuda_graph": False,  # Since this is embedding model, the input sequence length is not fixed, so enable_cuda_graph is not needed
                     }),
                     "CPUExecutionProvider"
                 ]
@@ -241,14 +241,17 @@ class BGEOpenXEmbedding(BaseEmbedding):
             
             # Create ONNX session with optimized settings
             session_options = ort.SessionOptions()
+            # session_options.log_severity_level = 1
             
             if gpu_available:
-                # GPU-optimized settings
+                # Conservative GPU settings to avoid compatibility issues
+                # session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+                # session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
                 session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
                 session_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
                 session_options.enable_mem_pattern = True
                 session_options.enable_cpu_mem_arena = True
-                print("🚀 Using GPU-optimized session settings")
+                print("🚀 Using conservative GPU session settings")
             else:
                 # CPU-optimized settings to prevent memory issues
                 session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
@@ -276,20 +279,42 @@ class BGEOpenXEmbedding(BaseEmbedding):
             except Exception as e:
                 print(f"❌ Failed to create ONNX session with providers {providers}: {e}")
                 if gpu_available and "CUDAExecutionProvider" in [p[0] if isinstance(p, tuple) else p for p in providers]:
-                    print("🔄 GPU memory allocation failed, retrying with CPU-only providers...")
-                    # Update session options for CPU-only execution
-                    session_options.enable_cpu_mem_arena = True  # Re-enable for CPU
-                    providers = ["CPUExecutionProvider"]
+                    print("🔄 CUDA initialization failed, trying fallback options...")
+                    
+                    # Try with simplified CUDA settings first
                     try:
+                        print("🔄 Trying simplified CUDA settings...")
+                        simplified_cuda_providers = [
+                            ("CUDAExecutionProvider", {
+                                "device_id": 0,
+                            }),
+                            "CPUExecutionProvider"
+                        ]
+                        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+                        session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
                         self.session = ort.InferenceSession(
                             onnx_path,
                             sess_options=session_options,
-                            providers=providers
+                            providers=simplified_cuda_providers
                         )
-                        print("✅ Successfully created CPU-only ONNX session")
-                    except Exception as cpu_e:
-                        print(f"❌ Failed to create CPU-only session: {cpu_e}")
-                        raise cpu_e
+                        print("✅ Successfully created ONNX session with simplified CUDA settings")
+                    except Exception as cuda_e:
+                        print(f"⚠️ Simplified CUDA settings also failed: {cuda_e}")
+                        print("🔄 Falling back to CPU-only execution...")
+                        
+                        # Update session options for CPU-only execution
+                        session_options.enable_cpu_mem_arena = True  # Re-enable for CPU
+                        providers = ["CPUExecutionProvider"]
+                        try:
+                            self.session = ort.InferenceSession(
+                                onnx_path,
+                                sess_options=session_options,
+                                providers=providers
+                            )
+                            print("✅ Successfully created CPU-only ONNX session")
+                        except Exception as cpu_e:
+                            print(f"❌ Failed to create CPU-only session: {cpu_e}")
+                            raise cpu_e
                 else:
                     raise e
             

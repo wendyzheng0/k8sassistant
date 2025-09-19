@@ -20,6 +20,18 @@ class MilvusService:
         self.collection_name = settings.COLLECTION_NAME
         self.vector_dim = settings.VECTOR_DIM
         self.mode = getattr(settings, 'MILVUS_MODE', 'embedded')
+        self._embedding_service = None
+    
+    def _get_actual_embedding_dimension(self) -> int:
+        """Get the actual embedding dimension from the embedding service"""
+        try:
+            if self._embedding_service is None:
+                from app.services.embedding_service import EmbeddingService
+                self._embedding_service = EmbeddingService()
+            return self._embedding_service.get_embedding_dimension()
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to get embedding dimension from service: {e}, using config value: {self.vector_dim}")
+            return self.vector_dim
         
     async def initialize(self):
         """Initialize Milvus connection"""
@@ -110,6 +122,12 @@ class MilvusService:
             # 检查集合是否存在
             collections = self.client.list_collections()
             
+            # 获取实际的嵌入维度
+            actual_dim = self._get_actual_embedding_dimension()
+            if actual_dim != self.vector_dim:
+                self.logger.warning(f"Embedding model dimension mismatch: existing={actual_dim}, expected={self.vector_dim}")
+                self.vector_dim = actual_dim
+            self.logger.info(f"Using embedding model dimension: {self.vector_dim}")
             if self.collection_name not in collections:
                 # 创建集合 - 使用 CollectionSchema 对象而不是字典
                 fields = [
@@ -143,25 +161,53 @@ class MilvusService:
                 
                 self.logger.info(f"✅ Created collection and index: {self.collection_name}")
             else:
-                # 集合已存在，确保索引存在
+                # 集合已存在，检查维度是否匹配
                 collection = Collection(self.collection_name)
-                try:
-                    has_indexes = getattr(collection, "indexes", None)
-                    if not has_indexes:
-                        collection.create_index(
-                            field_name="embedding",
-                            index_params={
-                                "index_type": "IVF_FLAT",
-                                "metric_type": "IP",
-                                "params": {"nlist": 1024}
-                            }
-                        )
-                    collection.load()
-                except Exception:
-                    # 忽略检查索引过程中的非致命错误，后续操作若失败再上抛
-                    pass
                 
-                self.logger.info(f"✅ Collection already exists: {self.collection_name}")
+                # 检查现有集合的维度
+                try:
+                    collection_info = self.client.describe_collection(self.collection_name)
+                    existing_dim = None
+                    
+                    # 从集合信息中提取向量维度
+                    if "fields" in collection_info:
+                        for field in collection_info["fields"]:
+                            if field.get("name") == "embedding" and field.get("type") == "FloatVector":
+                                existing_dim = field.get("params", {}).get("dim")
+                                break
+                    
+                    if existing_dim and existing_dim != self.vector_dim:
+                        self.logger.warning(f"Collection dimension mismatch: existing={existing_dim}, expected={self.vector_dim}")
+                        raise Exception(f"Collection dimension mismatch: existing={existing_dim}, expected={self.vector_dim}")
+                    else:
+                        # 维度匹配，确保索引存在
+                        try:
+                            has_indexes = getattr(collection, "indexes", None)
+                            if not has_indexes:
+                                collection.create_index(
+                                    field_name="embedding",
+                                    index_params={
+                                        "index_type": "IVF_FLAT",
+                                        "metric_type": "IP",
+                                        "params": {"nlist": 1024}
+                                    }
+                                )
+                            collection.load()
+                        except Exception:
+                            # 忽略检查索引过程中的非致命错误，后续操作若失败再上抛
+                            pass
+                        
+                        self.logger.info(f"✅ Collection already exists with correct dimension: {actual_dim}")
+                        
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Could not verify collection dimension: {e}")
+                    # 继续使用现有集合
+                    try:
+                        collection.load()
+                        self.logger.info(f"✅ Collection already exists: {self.collection_name}")
+                    except Exception as load_e:
+                        self.logger.error(f"❌ Failed to load collection: {load_e}")
+                        raise
                 
         except Exception as e:
             self.logger.error(f"❌ Failed to ensure collection exists: {e}")
@@ -322,8 +368,8 @@ class MilvusService:
                     "entity": entity  # 保留原始 entity 用于调试
                 })
             
-            self.logger.info(f"🔍 Search completed, returned {len(search_results)} results")
-            self.logger.info(f"Search results: {search_results}")
+            self.logger.info(f"🔍 Search completed, returned {len(search_results)} results, requested {top_k}")
+            # self.logger.info(f"Search results: {search_results}")
             return search_results
             
         except Exception as e:

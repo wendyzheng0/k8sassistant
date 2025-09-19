@@ -4,7 +4,7 @@ import type { ChatRequest, ChatResponse, ChatHistoryResponse } from '@/types/cha
 // 创建 axios 实例
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 120000, // 增加到2分钟，给LLM更多时间
   headers: {
     'Content-Type': 'application/json'
   }
@@ -41,19 +41,33 @@ export const chatAPI = {
 
   // 流式聊天
   async sendMessageStream(request: ChatRequest): Promise<ReadableStream> {
-    const response = await fetch('/api/chat/stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(request)
-    })
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 120000) // 2分钟超时
+    
+    try {
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      return response.body!
+    } catch (error: any) {
+      clearTimeout(timeoutId)
+      if (error.name === 'AbortError') {
+        throw new Error('请求超时，请稍后重试')
+      }
+      throw error
     }
-
-    return response.body!
   },
 
   // 获取聊天历史

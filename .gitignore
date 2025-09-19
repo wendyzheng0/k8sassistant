@@ -51,6 +51,8 @@ logs/
 
 # Data/model caches (large or generated)
 hf_cache/
+models/
+milvus_embedded_data/
 
 # Local/temporary files
 *.tmp
