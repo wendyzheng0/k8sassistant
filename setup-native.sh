@@ -121,7 +121,8 @@ system_check() {
     AVAILABLE_SPACE=$(df -h . | awk 'NR==2{print $4}' | sed 's/[^0-9.]//g')
     if [ -n "$AVAILABLE_SPACE" ]; then
         echo "Available Disk Space: $(df -h . | awk 'NR==2{print $4}')"
-        if (( $(echo "$AVAILABLE_SPACE < 10" | bc -l) )); then
+        # Use awk for floating point comparison instead of bc
+        if echo "$AVAILABLE_SPACE 10" | awk '{exit !($1 < $2)}'; then
             echo -e "${YELLOW}⚠️  Warning: Less than 10GB disk space${NC}"
             WARNING_CHECKS=$((WARNING_CHECKS + 1))
         else

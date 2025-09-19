@@ -15,6 +15,7 @@ from app.models.chat import (
 from app.services.milvus_service import MilvusService
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
+from app.services.complex_retrieval_service import ComplexRetrievalService
 from app.core.logging import get_logger
 
 router = APIRouter()
@@ -26,21 +27,26 @@ def get_milvus_service(request: Request) -> MilvusService:
     return request.app.state.milvus_service
 
 
-def get_embedding_service() -> EmbeddingService:
+def get_embedding_service(request: Request) -> EmbeddingService:
     """获取嵌入服务实例"""
-    return EmbeddingService()
+    return request.app.state.embedding_service
 
 
-def get_llm_service() -> LLMService:
+def get_llm_service(request: Request) -> LLMService:
     """获取 LLM 服务实例"""
-    return LLMService()
+    return request.app.state.llm_service
+
+
+def get_complex_retrieval_service(request: Request) -> ComplexRetrievalService:
+    """获取复杂检索服务实例"""
+    return request.app.state.complex_retrieval_service
+
 
 
 @router.post("", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    milvus_service: MilvusService = Depends(get_milvus_service),
-    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    complex_retrieval_service: ComplexRetrievalService = Depends(get_complex_retrieval_service),
     llm_service: LLMService = Depends(get_llm_service)
 ):
     """
@@ -51,17 +57,22 @@ async def chat(
         
         # 生成对话ID（如果未提供）
         conversation_id = request.conversation_id or str(uuid.uuid4())
+
+        refined_query = await llm_service.generate_refine_query(
+            request.message, 0.1, 1024)
         
-        # 1. 将用户查询编码为向量
-        query_embedding = embedding_service.encode(request.message)[0]
-        
-        # 2. 在向量数据库中搜索相似文档
-        similar_docs = await milvus_service.search_similar(
-            query_embedding=query_embedding,
-            top_k=5
+        # 1. 使用复杂检索服务进行信息检索
+        retrieval_result = await complex_retrieval_service.search(
+            query=refined_query,
+            top_k=5,
+            milvus_weight=0.6,  # Milvus向量检索权重
+            elasticsearch_weight=0.4,  # Elasticsearch关键字检索权重
+            use_reranking=True  # 启用重排序
         )
         
-        logger.info(f"🔍 Found {len(similar_docs)} relevant documents")
+        similar_docs = retrieval_result.documents
+        logger.info(f"🔍 Found {len(similar_docs)} relevant documents using complex retrieval")
+        logger.info(f"📊 Retrieval stats: {retrieval_result.metadata}")
         
         # 3. 构建对话历史（如果提供）
         conversation_history = None
@@ -72,11 +83,16 @@ async def chat(
             ]
         
         # 4. 使用 LLM 生成回复
-        response_content = await llm_service.generate_rag_response(
-            query=request.message,
-            context_docs=similar_docs,
-            conversation_history=conversation_history
-        )
+        try:
+            response_content = await llm_service.generate_rag_response(
+                query=request.message,
+                context_docs=similar_docs,
+                conversation_history=conversation_history
+            )
+        except Exception as llm_error:
+            logger.error(f"❌ LLM service failed: {llm_error}")
+            # 如果LLM失败，返回错误信息
+            response_content = f"抱歉，AI服务暂时不可用。错误信息：{str(llm_error)}"
         
         # 5. 构建响应
         response = ChatResponse(
@@ -87,10 +103,10 @@ async def chat(
             sources=[
                 {
                     "title": doc.get("file_path", "unknown"),
-                    "doc_id": doc.get("doc_id", "unknown"),
+                    "doc_id": doc.get("id", "unknown"),
                     "content": doc.get("content", "unknown"),
                     "url": doc.get("metadata", {}).get("url", ""),
-                    "score": doc.get("score", 0)
+                    "score": doc.get("combined_score", doc.get("rerank_score", 0))
                 }
                 for doc in similar_docs
             ]
@@ -101,14 +117,21 @@ async def chat(
         
     except Exception as e:
         logger.error(f"❌ Chat processing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
+        # 返回更友好的错误信息而不是抛出异常
+        return ChatResponse(
+            message_id=str(uuid.uuid4()),
+            content=f"抱歉，处理您的请求时出现错误。请稍后重试。错误信息：{str(e)}",
+            conversation_id=request.conversation_id or str(uuid.uuid4()),
+            timestamp=datetime.utcnow(),
+            sources=[],
+            metadata={'error': True, 'error_message': str(e)}
+        )
 
 
 @router.post("/stream")
 async def chat_stream(
     request: ChatRequest,
-    milvus_service: MilvusService = Depends(get_milvus_service),
-    embedding_service: EmbeddingService = Depends(get_embedding_service),
+    complex_retrieval_service: ComplexRetrievalService = Depends(get_complex_retrieval_service),
     llm_service: LLMService = Depends(get_llm_service)
 ):
     """
@@ -120,16 +143,18 @@ async def chat_stream(
         # 生成对话ID（如果未提供）
         conversation_id = request.conversation_id or str(uuid.uuid4())
         
-        # 1. 将用户查询编码为向量
-        query_embedding = embedding_service.encode(request.message)[0]
-        
-        # 2. 在向量数据库中搜索相似文档
-        similar_docs = await milvus_service.search_similar(
-            query_embedding=query_embedding,
-            top_k=5
+        # 1. 使用复杂检索服务进行信息检索
+        retrieval_result = await complex_retrieval_service.search(
+            query=request.message,
+            top_k=5,
+            milvus_weight=0.6,  # Milvus向量检索权重
+            elasticsearch_weight=0.4,  # Elasticsearch关键字检索权重
+            use_reranking=True  # 启用重排序
         )
         
-        logger.info(f"🔍 Found {len(similar_docs)} relevant documents")
+        similar_docs = retrieval_result.documents
+        logger.info(f"🔍 Found {len(similar_docs)} relevant documents using complex retrieval")
+        logger.info(f"📊 Retrieval stats: {retrieval_result.metadata}")
         
         # 3. 构建对话历史（如果提供）
         conversation_history = None

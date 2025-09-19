@@ -34,7 +34,14 @@ class Settings(BaseSettings):
     MILVUS_MODE: str = "embedded"  # "standalone" 或 "embedded"
     MILVUS_URI: str = "http://localhost:19530"
     COLLECTION_NAME: str = "k8s_docs"
-    VECTOR_DIM: int = 384
+    VECTOR_DIM: int = 384  # 支持512维的BGE模型,目前发现BAAI/bge-small-en-v1.5是384的,BAAI/bge-small-zh-v1.5是512的
+    
+    # Elasticsearch 配置
+    ELASTICSEARCH_HOST: str = "https://localhost:9200"
+    ELASTICSEARCH_INDEX: str = "k8s-docs"
+    ELASTICSEARCH_USER: str = "elastic"
+    ELASTICSEARCH_PASSWORD: str = "password"
+    ELASTICSEARCH_CA_CERTS: str = ""
     
     # LLM 配置
     LLM_API_KEY: str = ""  # 必需配置

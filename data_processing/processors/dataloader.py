@@ -154,7 +154,7 @@ def init_vector_store(db_uri):
     try:
         inferred_dim = len(Settings.embed_model.get_text_embedding("__dim_probe__"))
     except Exception:
-        inferred_dim = 1024
+        inferred_dim = 512  # BGE-small-zh-v1.5 512维版本
 
     vector_store = MilvusVectorStore(
         uri=db_uri,                        # 连接地址

@@ -21,9 +21,9 @@ def get_milvus_service(request: Request) -> MilvusService:
     return request.app.state.milvus_service
 
 
-def get_embedding_service() -> EmbeddingService:
+def get_embedding_service(request: Request) -> EmbeddingService:
     """获取嵌入服务实例"""
-    return EmbeddingService()
+    return request.app.state.embedding_service
 
 
 @router.get("/search")

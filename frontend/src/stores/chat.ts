@@ -57,11 +57,26 @@ export const useChatStore = defineStore('chat', () => {
       console.error('发送消息失败:', err)
       error.value = err instanceof Error ? err.message : '发送消息失败'
       
+      // 根据错误类型提供更详细的错误信息
+      let errorContent = '抱歉，发送消息时出现错误，请稍后重试。'
+      
+      if (err instanceof Error) {
+        if (err.message.includes('timeout') || err.message.includes('超时')) {
+          errorContent = '请求超时，LLM响应时间较长，请稍后重试。'
+        } else if (err.message.includes('Network Error') || err.message.includes('网络')) {
+          errorContent = '网络连接错误，请检查网络连接后重试。'
+        } else if (err.message.includes('500')) {
+          errorContent = '服务器内部错误，请稍后重试。如果问题持续，请联系管理员。'
+        } else if (err.message.includes('404')) {
+          errorContent = '服务不可用，请检查后端服务是否正常运行。'
+        }
+      }
+      
       // Add error message
       const errorMessage: ChatMessage = {
         id: generateId(),
         role: MessageRole.ASSISTANT,
-        content: '抱歉，发送消息时出现错误，请稍后重试。',
+        content: errorContent,
         messageType: MessageType.ERROR,
         timestamp: new Date().toISOString()
       }
