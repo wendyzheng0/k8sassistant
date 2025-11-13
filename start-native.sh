@@ -63,7 +63,7 @@ mkdir -p logs
 mkdir -p hf_cache
 
 # Set environment variables
-export MILVUS_MODE=${MILVUS_MODE:-embedded}
+# export MILVUS_MODE=${MILVUS_MODE:-embedded}
 export COLLECTION_NAME=${COLLECTION_NAME:-k8s_docs}
 export EMBEDDING_CACHE_DIR=${EMBEDDING_CACHE_DIR:-hf_cache}
 

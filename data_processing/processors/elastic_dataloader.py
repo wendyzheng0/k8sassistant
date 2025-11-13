@@ -22,7 +22,7 @@ if os.path.exists(ENV_PATH):
 
 # Defaults
 DEFAULT_DATA_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "zh-cn-orig", "docs"
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "zh-cn"
 )
 DEFAULT_ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200")
 DEFAULT_ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "k8s-docs")
@@ -158,17 +158,39 @@ def ensure_index(es: Elasticsearch, index_name: str) -> None:
 def connect_es(host: str) -> Elasticsearch:
     username = os.getenv("ELASTICSEARCH_USER", "elastic")
     password = os.getenv("ELASTICSEARCH_PASSWORD", "password")
-    ca_certs = os.getenv("ELASTICSEARCH_CA_CERTS", "elasticsearch-9.1.3/config/certs/http_ca.crt")
-    es = Elasticsearch(
-        hosts=[host], 
-        basic_auth=(username, password), 
-        ca_certs=ca_certs
-    )
+    ca_certs = os.getenv("ELASTICSEARCH_CA_CERTS")
+    
+    # Determine if we should use SSL based on the host URL
+    use_ssl = host.startswith("https://")
+    
+    # Build connection parameters
+    connection_params = {
+        "hosts": [host],
+        "basic_auth": (username, password),
+    }
+    
+    if use_ssl and ca_certs and os.path.exists(ca_certs):
+        connection_params["ca_certs"] = ca_certs
+        print(f"🔒 Using SSL with certificate: {ca_certs}")
+    elif use_ssl:
+        print("⚠️ SSL enabled but certificate not found, using verify_certs=False")
+        connection_params["verify_certs"] = False
+        connection_params["ssl_show_warn"] = False
+    
+    es = Elasticsearch(**connection_params)
+    
     try:
         info = es.info()
         print(f"🔗 Connected to Elasticsearch: {info.get('version', {}).get('number', 'unknown')}")
     except Exception as e:
+        print(f"❌ Connection failed: {e}")
+        print("💡 Troubleshooting tips:")
+        print("   1. Check if Elasticsearch is running")
+        print("   2. Verify the host URL (http://localhost:9200 or https://localhost:9200)")
+        print("   3. Check username/password credentials")
+        print("   4. For HTTPS, ensure certificate path is correct")
         raise RuntimeError(f"Cannot connect to Elasticsearch at {host}: {e}")
+    
     return es
 
 

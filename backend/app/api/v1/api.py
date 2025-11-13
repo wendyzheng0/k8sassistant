@@ -3,7 +3,7 @@ API 路由主文件
 """
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import chat, documents, health, graphrag, complex_retrieval
+from app.api.v1.endpoints import chat, documents, health, complex_retrieval
 
 # 创建主路由
 api_router = APIRouter()
