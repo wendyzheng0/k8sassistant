@@ -269,8 +269,12 @@ mkdir -p logs
 mkdir -p hf_cache
 mkdir -p codeblocks
 cd backend
-ln -s ../hf_cache hf_cache
-ln -s ../codeblocks codeblocks
+if [ ! -d "hf_cache" ]; then
+    ln -s ../hf_cache hf_cache
+fi
+if [ ! -d "codeblocks" ]; then
+    ln -s ../codeblocks codeblocks
+fi
 cd ..
 echo -e "${GREEN}✅ Directory creation completed${NC}"
 

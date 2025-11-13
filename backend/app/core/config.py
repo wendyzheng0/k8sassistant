@@ -37,11 +37,11 @@ class Settings(BaseSettings):
     VECTOR_DIM: int = 384  # 支持512维的BGE模型,目前发现BAAI/bge-small-en-v1.5是384的,BAAI/bge-small-zh-v1.5是512的
     
     # Elasticsearch 配置
-    ELASTICSEARCH_HOST: str = "https://localhost:9200"
+    ELASTICSEARCH_HOST: str = "http://localhost:9200"  # 默认使用HTTP，避免SSL证书问题
     ELASTICSEARCH_INDEX: str = "k8s-docs"
     ELASTICSEARCH_USER: str = "elastic"
     ELASTICSEARCH_PASSWORD: str = "password"
-    ELASTICSEARCH_CA_CERTS: str = ""
+    ELASTICSEARCH_CA_CERTS: str = ""  # 留空，让代码自动检测证书路径
     
     # LLM 配置
     LLM_API_KEY: str = ""  # 必需配置
@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     HF_MIRROR_BASE_URL: str = ""  # 例如: https://hf-mirror.com
     HF_OFFLINE: bool = False
     
-    # For dataloader in pipeline
-    NLTK_DATA: str = str(Path(sys.prefix) / "lib" / "nltk_data")
+    # For dataloader in pipeline - 使用项目目录下的 nltk_data
+    NLTK_DATA: str = str(ROOT_DIR / "data_processing" / "processors" / "nltk_data")
 
     # 数据处理配置
     DOCS_DIR: Path = ROOT_DIR / "docs"

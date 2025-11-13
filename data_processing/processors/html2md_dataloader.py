@@ -21,6 +21,8 @@ from llama_index.core import (
     StorageContext,
     Document
 )
+from llama_index.core.storage.docstore.simple_docstore import SimpleDocumentStore
+from llama_index.core.storage.index_store.simple_index_store import SimpleIndexStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.milvus import MilvusVectorStore
@@ -38,7 +40,7 @@ if os.path.exists('../../.env'):
 
 # Default values
 DEFAULT_DB_URI = 'http://localhost:19530'
-DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'zh-cn', 'docs')
+DEFAULT_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data', 'zh-cn')
 DEFAULT_MD_CACHE = "./md_cache"
 DEFAULT_MILVUS_DATA = "milvus_data"
 DEFAULT_START_MILVUS = False
@@ -53,8 +55,8 @@ def init_embed_model():
     model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     device = os.getenv("EMBEDDING_DEVICE", "cpu")
     backend = os.getenv("EMBEDDING_BACKEND", "torch")  # torch, onnx, openvino
-    cache_dir = os.getenv("EMBEDDING_CACHE_DIR", "hf_cache")
     cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'hf_cache')
+    cache_dir = os.getenv("EMBEDDING_CACHE_DIR", cache_dir)
     
     # 初始化嵌入模型
     model_path = model_name
@@ -75,7 +77,7 @@ def init_embed_model():
         )
         print(f"model downloaded to {model_path}")
     
-    print(f"Create embedding model")
+    print(f"Load embedding model")
     print(f"model_path: {model_path}")
     print(f"device: {device}")
     print(f"backend: {backend}")
@@ -133,8 +135,8 @@ def init_embed_model():
 
 def init_llm():
     # 使用 OpenAI 兼容接口，可通过环境变量配置自定义网关
-    base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL")
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+    base_url = os.getenv("LLM_BASE_URL")
+    api_key = os.getenv("LLM_API_KEY")
     model_name = os.getenv("LLM_MODEL", "qwen-plus")
     Settings.llm = OpenAI(model=model_name, base_url=base_url, api_key=api_key)
 
@@ -255,10 +257,22 @@ def process(data_dir, md_cache, db_uri=DEFAULT_DB_URI):
 
     print(f"\nLoading completed, total {len(md_docs)} documents")
 
-    # 创建存储上下文
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+    # 创建存储上下文，使用显式组件避免文件加载问题
+    # docstore = SimpleDocumentStore()
+    # index_store = SimpleIndexStore()
+    
+    # storage_context = StorageContext.from_defaults(
+    #     docstore=docstore,
+    #     index_store=index_store,
+    #     vector_store=vector_store
+    # )
+    
     # 从文档创建向量索引
     print("\n📥 Starting to build vector index...")
+    print(f"📁 Vector store: {vector_store.collection_name}")
+    
     index = VectorStoreIndex.from_documents(
         md_docs,
         storage_context=storage_context,

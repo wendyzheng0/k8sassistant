@@ -1,6 +1,7 @@
 #--extra-index-url https://pypi.org/simple
+#--extra-index-url https://mirrors.aliyun.com/pypi/simple
 # FastAPI 框架
-fastapi==0.104.1
+fastapi
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
@@ -16,8 +17,11 @@ elasticsearch==9.1.1
 # torchaudio==2.1.1+cpu
 
 # ONNX Runtime for GPU acceleration
-onnxruntime-gpu==1.19.0
-optimum[onnxruntime-gpu]==1.17.1
+# onnxruntime-gpu==1.19.0
+# optimum[onnxruntime-gpu]==1.17.1
+# onnxruntime
+# optimum
+optimum[onnxruntime]
 
 # NVIDIA cuDNN for CUDA 12.x
 #nvidia-cudnn-cu12==8.9.2.26
@@ -27,6 +31,7 @@ sentence-transformers==4.1.0
 transformers==4.56.1
 huggingface_hub==0.34.4
 llama-index-embeddings-huggingface==0.6.0
+llama-index-vector-stores-milvus==0.9.3
 
 # LLM 集成
 openai==1.105.0
@@ -54,6 +59,8 @@ pydantic==2.11.7
 pydantic-settings==2.10.1
 httpx==0.25.2
 aiofiles==23.2.1
+psutil==7.1.2
+onnx==1.19.1
 
 # 日志和监控
 loguru==0.7.2

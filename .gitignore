@@ -94,3 +94,14 @@ nginx/proxy_temp/
 
 # Windows shell history (PowerShell)
 *.pshistory
+
+# ------------------------------
+# Native
+# ------------------------------
+data/
+*_cache
+k8senv
+nltk_data/
+milvus_data
+codeblocks
+*.pid
