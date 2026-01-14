@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     MAX_GRAPH_DEPTH: int = 3
     ENTITY_BOOST_FACTOR: float = 1.2
     
+    # RRF重排序配置
+    RRF_K: int = 60  # RRF算法中的常数，默认60，可尝试40或80
+    
     model_config = SettingsConfigDict(
         env_file=ROOT_DIR / ".env",
         case_sensitive=True,

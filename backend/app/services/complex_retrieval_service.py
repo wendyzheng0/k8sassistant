@@ -46,15 +46,16 @@ class RetrievalResult:
 class RRFReranker:
     """RRF (Reciprocal Rank Fusion) 重排序器"""
     
-    def __init__(self, k: int = 60):
+    def __init__(self, k: Optional[int] = None):
         """
         初始化 RRF 重排序器
         
         Args:
-            k: RRF 算法中的常数，通常设置为 60
+            k: RRF 算法中的常数，通常设置为 60。如果为None，则从配置中读取
         """
         self.logger = get_logger("RRFReranker")
-        self.k = k
+        self.k = k if k is not None else getattr(settings, 'RRF_K', 60)
+        self.logger.info(f"🔄 RRF reranker initialized with k={self.k}")
     
     def rerank(
         self, 
@@ -270,6 +271,12 @@ class ElasticsearchService:
             
         except Exception as e:
             self.logger.error(f"❌ Failed to connect to Elasticsearch: {e}")
+            self.logger.error(f"   Host: {self.host}, Index: {self.index_name}")
+            self.logger.error("   The system will continue with vector-only search, but retrieval quality may be reduced.")
+            self.logger.error("   Please check:")
+            self.logger.error("   1. Elasticsearch service is running")
+            self.logger.error("   2. Connection credentials are correct")
+            self.logger.error("   3. Network connectivity to Elasticsearch host")
             self.client = None
     
     async def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
@@ -284,7 +291,9 @@ class ElasticsearchService:
             搜索结果列表
         """
         if not self.client:
-            self.logger.warning("⚠️ Elasticsearch client not initialized")
+            self.logger.warning("⚠️ Elasticsearch client not initialized - falling back to vector-only search")
+            self.logger.warning(f"   Elasticsearch host: {self.host}, index: {self.index_name}")
+            self.logger.warning("   This may reduce retrieval quality. Please check Elasticsearch connection.")
             return []
         
         try:
@@ -358,7 +367,9 @@ class ContextualCompressionRetriever:
         self.milvus_service = MilvusService()
         self.elasticsearch_service = ElasticsearchService()
         self.embedding_service = EmbeddingService()
-        self.rrf_reranker = RRFReranker()
+        # 使用配置中的RRF_K值
+        rrf_k = getattr(settings, 'RRF_K', 60)
+        self.rrf_reranker = RRFReranker(k=rrf_k)
         self.cross_encoder_reranker = CrossEncoderReranker()
     
     async def initialize(self):
@@ -407,8 +418,8 @@ class ContextualCompressionRetriever:
             # 3. 使用 CrossEncoder 进行第二次重排序（如果启用）
             reranked_results = rrf_results
             if request.use_reranking and len(rrf_results) > 1:
-                # 只对前 top_k*2 个 RRF 结果进行 CrossEncoder 重排序，提高效率
-                candidates_for_rerank = rrf_results[:request.top_k * 2]
+                # 对前 top_k*3 个 RRF 结果进行 CrossEncoder 重排序，最多50个，提高检索质量
+                candidates_for_rerank = rrf_results[:min(request.top_k * 3, 50, len(rrf_results))]
                 reranked_results = self.cross_encoder_reranker.rerank(
                     request.query, 
                     candidates_for_rerank, 
@@ -455,7 +466,7 @@ class ContextualCompressionRetriever:
             # 在 Milvus 中搜索
             similar_docs = await self.milvus_service.search_similar(
                 query_embedding=query_embedding,
-                top_k=request.top_k * 4  # 获取更多结果用于后续处理
+                top_k=request.top_k * 5  # 获取更多结果用于后续处理，提高检索质量
             )
             
             # 格式化结果
@@ -480,16 +491,26 @@ class ContextualCompressionRetriever:
     async def _elasticsearch_search(self, request: RetrievalRequest) -> List[Dict[str, Any]]:
         """执行 Elasticsearch 文本搜索"""
         try:
+            # 检查Elasticsearch连接状态
+            if not self.elasticsearch_service.client:
+                self.logger.warning("⚠️ Elasticsearch not available, skipping keyword search")
+                self.logger.warning("   Retrieval will rely on vector search only, which may reduce quality")
+                return []
+            
             # 在 Elasticsearch 中搜索
             es_results = await self.elasticsearch_service.search(
                 query=request.query,
-                top_k=request.top_k * 4  # 获取更多结果用于后续处理
+                top_k=request.top_k * 5  # 获取更多结果用于后续处理，提高检索质量
             )
+            
+            if len(es_results) == 0:
+                self.logger.warning(f"⚠️ Elasticsearch returned no results for query: {request.query[:50]}...")
             
             return es_results
             
         except Exception as e:
             self.logger.error(f"❌ Elasticsearch search failed: {e}")
+            self.logger.error("   Falling back to vector-only search")
             return []
     
     async def _combine_results(

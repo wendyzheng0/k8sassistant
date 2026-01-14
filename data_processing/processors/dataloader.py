@@ -113,11 +113,51 @@ def init_embed_model():
 
 
 def init_llm():
-    # 使用 OpenAI 兼容接口，可通过环境变量配置自定义网关
+    """
+    初始化 LLM 配置，支持本地 Ollama 和远程 OpenAI 兼容服务
+    
+    配置方式（通过 .env 文件或环境变量）：
+    - LLM_BASE_URL: LLM API 的基础URL（默认: http://localhost:11434/v1 用于 Ollama）
+    - LLM_API_KEY: LLM API 的密钥（Ollama 通常不需要，可以设置为空或 "ollama"）
+    - LLM_MODEL: 模型名称（默认: qwen3:14b）
+    
+    使用本地 Ollama 的配置示例（在 .env 文件中）：
+        LLM_BASE_URL=http://localhost:11434/v1
+        LLM_API_KEY=ollama
+        LLM_MODEL=qwen3:14b
+    
+    注意：使用 LangChainLLM 包装 ChatOpenAI 以支持自定义模型名称（如 Ollama）
+    """
+    # 从环境变量读取配置（支持 .env 文件）
     base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL")
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
-    model_name = os.getenv("LLM_MODEL", "qwen-plus")
-    Settings.llm = OpenAI(model=model_name, base_url=base_url, api_key=api_key)
+    model_name = os.getenv("LLM_MODEL", "qwen3:14b")
+
+    print(f"🤖 Initializing LLM...")
+    print(f"   Model: {model_name}")
+    print(f"   Base URL: {base_url}")
+    print(f"   API Key: {'*' * min(len(api_key), 10) if api_key != 'ollama' else 'ollama (no key required)'}")
+    
+    try:
+        # 使用 LangChainLLM 包装 ChatOpenAI 以支持自定义模型名称（如 Ollama）
+        # ChatOpenAI 不会严格验证模型名称，可以支持任何 OpenAI 兼容的 API
+        from langchain_openai import ChatOpenAI
+        from llama_index.llms.langchain import LangChainLLM
+        
+        lc_llm = ChatOpenAI(
+            model=model_name,
+            base_url=base_url,
+            api_key=api_key if api_key != "ollama" else None,  # Ollama 不需要 API key
+            temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
+        )
+        Settings.llm = LangChainLLM(lc_llm)
+        print(f"✅ LLM initialized successfully")
+    except Exception as e:
+        print(f"⚠️  Warning: Failed to initialize LLM: {e}")
+        print(f"   TitleExtractor and KeywordExtractor will be disabled")
+        print(f"   Please ensure Ollama is running and the model '{model_name}' is available")
+        print(f"   You can check available models with: ollama list")
+        Settings.llm = None
 
 
 def start_milvus(milvus_data_path=DEFAULT_MILVUS_DATA, port=19530):
@@ -192,10 +232,28 @@ def process_with_html_parser(data_dir, db_uri):
             chunk_overlap=chunk_overlap,
             separator="\n\n"  # 使用双换行符作为分隔符
         ),
-        # These extractors depends on LLM, so we disable them
-        # TitleExtractor(),
-        # KeywordExtractor(keywords=3),
     ]
+    
+    # 检查是否启用 LLM 提取器（TitleExtractor 和 KeywordExtractor）
+    # 这些提取器需要 LLM 支持，会增加处理时间
+    enable_llm_extractors = os.getenv("ENABLE_LLM_EXTRACTORS", "true").lower() == "true"
+    
+    if enable_llm_extractors:
+        # 验证 LLM 是否已配置
+        if Settings.llm is None:
+            print("⚠️  Warning: LLM is not configured. TitleExtractor and KeywordExtractor will be disabled.")
+            print("   To enable them, please configure LLM settings in .env file or call init_llm() first.")
+        else:
+            print("📝 Enabling LLM-based extractors (TitleExtractor, KeywordExtractor)...")
+            keyword_count = int(os.getenv("KEYWORD_COUNT", "3"))
+            transformations.extend([
+                TitleExtractor(),
+                KeywordExtractor(keywords=keyword_count),
+            ])
+            print(f"   - TitleExtractor: enabled")
+            print(f"   - KeywordExtractor: enabled (keywords={keyword_count})")
+    else:
+        print("ℹ️  LLM extractors are disabled (ENABLE_LLM_EXTRACTORS=false)")
     
     # Create ingestion pipeline
     pipeline = IngestionPipeline(transformations=transformations)
@@ -222,7 +280,6 @@ def process_with_html_parser(data_dir, db_uri):
                     continue
                 print(f"Processing file: {file_path}")
             
-            # processed_doc = preprocess_html_document(doc)
             processed_doc = preprocess_html_document_safe(doc)
             nodes = pipeline.run(documents=[processed_doc])
             batch_nodes.extend(nodes)

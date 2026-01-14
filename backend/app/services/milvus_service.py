@@ -153,7 +153,7 @@ class MilvusService:
                     field_name="embedding",
                     index_params={
                         "index_type": "IVF_FLAT",
-                        "metric_type": "IP",
+                        "metric_type": "COSINE",
                         "params": {"nlist": 1024}
                     }
                 )
@@ -188,7 +188,7 @@ class MilvusService:
                                     field_name="embedding",
                                     index_params={
                                         "index_type": "IVF_FLAT",
-                                        "metric_type": "IP",
+                                        "metric_type": "COSINE",
                                         "params": {"nlist": 1024}
                                     }
                                 )
@@ -275,39 +275,58 @@ class MilvusService:
                 self.logger.warning(f"⚠️ Unable to check collection status: {e}")
                 # 继续尝试搜索，如果失败再处理
             
-            # 执行向量搜索 - 修复参数问题
+            # 执行向量搜索 - 优先使用COSINE度量类型
+            # 动态计算nprobe参数：根据集合大小调整，范围在10-256之间
             try:
-                # 使用正确的参数格式，避免参数冲突
-                # 在 pymilvus 2.6.1 中，search_params 包含所有搜索参数
+                collection_info = self.client.describe_collection(self.collection_name)
+                row_count = collection_info.get("num_rows", 0) or collection_info.get("row_count", 0)
+                
+                # 根据数据量动态调整nprobe
+                if row_count < 1000:
+                    nprobe = 10
+                elif row_count < 10000:
+                    nprobe = 32
+                elif row_count < 100000:
+                    nprobe = 64
+                else:
+                    nprobe = 128
+                
+                self.logger.info(f"📊 Collection size: {row_count}, using nprobe: {nprobe}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Unable to get collection size for nprobe calculation: {e}, using default nprobe=32")
+                nprobe = 32
+            
+            try:
+                # 优先使用 COSINE 度量类型（与索引一致）
                 results = self.client.search(
                     collection_name=self.collection_name,
                     data=[query_embedding],
                     search_params={
-                        "metric_type": "IP",
-                        "params": {"nprobe": 10}
+                        "metric_type": "COSINE",
+                        "params": {"nprobe": nprobe}
                     },
                     limit=top_k,
                     output_fields=["*"]  # 使用 "*" 获取所有字段，避免字段名不匹配问题
                 )
-                self.logger.info("✅ Search successful with IP metric type")
+                self.logger.info("✅ Search successful with COSINE metric type")
             except Exception as e:
-                self.logger.warning(f"⚠️ IP metric search failed: {e}")
+                self.logger.warning(f"⚠️ COSINE metric search failed: {e}")
                 try:
-                    # 尝试使用 COSINE 度量类型
-                    self.logger.info("Trying COSINE metric type...")
+                    # 回退到 IP 度量类型
+                    self.logger.info("Trying IP metric type as fallback...")
                     results = self.client.search(
                         collection_name=self.collection_name,
                         data=[query_embedding],
                         search_params={
-                            "metric_type": "COSINE",
-                            "params": {"nprobe": 10}
+                            "metric_type": "IP",
+                            "params": {"nprobe": nprobe}
                         },
                         limit=top_k,
                         output_fields=["*"]
                     )
-                    self.logger.info("✅ Search successful with COSINE metric type")
+                    self.logger.info("✅ Search successful with IP metric type (fallback)")
                 except Exception as e2:
-                    self.logger.warning(f"⚠️ COSINE metric search failed: {e2}")
+                    self.logger.warning(f"⚠️ IP metric search failed: {e2}")
                     # 尝试简化的参数格式作为最后的回退
                     self.logger.info("Trying simplified search parameter format...")
                     results = self.client.search(

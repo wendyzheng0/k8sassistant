@@ -64,7 +64,7 @@ async def chat(
         # 1. 使用复杂检索服务进行信息检索
         retrieval_result = await complex_retrieval_service.search(
             query=refined_query,
-            top_k=5,
+            top_k=10,
             milvus_weight=0.6,  # Milvus向量检索权重
             elasticsearch_weight=0.4,  # Elasticsearch关键字检索权重
             use_reranking=True  # 启用重排序
@@ -143,10 +143,14 @@ async def chat_stream(
         # 生成对话ID（如果未提供）
         conversation_id = request.conversation_id or str(uuid.uuid4())
         
+        # 优化查询以提高检索质量
+        refined_query = await llm_service.generate_refine_query(
+            request.message, 0.1, 1024)
+        
         # 1. 使用复杂检索服务进行信息检索
         retrieval_result = await complex_retrieval_service.search(
-            query=request.message,
-            top_k=5,
+            query=refined_query,
+            top_k=10,
             milvus_weight=0.6,  # Milvus向量检索权重
             elasticsearch_weight=0.4,  # Elasticsearch关键字检索权重
             use_reranking=True  # 启用重排序

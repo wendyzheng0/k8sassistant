@@ -491,6 +491,7 @@ def create_bge_onnx_embedding(
 if __name__ == "__main__":
     # Test the wrapper
     model_path = "../../hf_cache/models--BAAI--bge-small-en-v1.5/snapshots/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
+    model_path = '../../hf_cache/models--BAAI--bge-small-zh-v1.5/snapshots/7999e1d3359715c523056ef9478215996d62a620'
     
     try:
         # Create embedding model
