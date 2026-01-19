@@ -48,7 +48,8 @@ export const chatAPI = {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream'
         },
         body: JSON.stringify(request),
         signal: controller.signal
@@ -130,6 +131,50 @@ export const healthAPI = {
   // 就绪检查
   async readinessCheck() {
     return api.get('/health/ready')
+  }
+}
+
+// 管理界面API类型
+export interface AdminTreeNode {
+  label: string
+  path: string
+  is_file: boolean
+  children?: AdminTreeNode[]
+}
+
+export interface AdminChunk {
+  id: string
+  content: string
+  doc_id?: string
+  file_path?: string
+  chunk_index?: number
+  metadata?: Record<string, any>
+}
+
+export interface AdminStats {
+  collection_name?: string
+  total_chunks?: number
+  vector_dimension?: number
+  status?: string
+}
+
+// 管理界面API
+export const adminAPI = {
+  // 获取文档树结构
+  async getDocumentTree(): Promise<{ tree: AdminTreeNode[], base_path: string }> {
+    return api.get('/admin/document-tree')
+  },
+
+  // 根据文件路径获取分块
+  async getChunksByPath(filePath: string): Promise<{ file_path: string, chunks: AdminChunk[], total: number }> {
+    return api.get('/admin/chunks', {
+      params: { file_path: filePath }
+    })
+  },
+
+  // 获取管理统计信息
+  async getStats(): Promise<AdminStats> {
+    return api.get('/admin/stats')
   }
 }
 

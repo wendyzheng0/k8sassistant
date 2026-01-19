@@ -115,41 +115,123 @@ export const useChatStore = defineStore('chat', () => {
       const reader = stream.getReader()
       const decoder = new TextDecoder()
 
-      // Create assistant message placeholder
+      // Create assistant message placeholder and get its index for reactive updates
       const assistantMessage: ChatMessage = {
         id: generateId(),
         role: MessageRole.ASSISTANT,
-        content: '',
+        content: '...',
         messageType: MessageType.TEXT,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        metadata: {}
       }
       messages.value.push(assistantMessage)
+      const msgIndex = messages.value.length - 1
 
       let fullContent = ''
       let conversationId = ''
+      let buffer = ''
+
+      const handleRawSseEvent = (rawEvent: string) => {
+        if (!rawEvent.trim()) return
+
+        let eventType = 'message'
+        const dataLines: string[] = []
+
+        for (const line of rawEvent.split('\n')) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim()
+            continue
+          }
+          if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trimStart())
+          }
+        }
+
+        const dataStr = dataLines.join('\n')
+        let payload: any = {}
+        try {
+          payload = dataStr ? JSON.parse(dataStr) : {}
+        } catch (e) {
+          console.warn('Failed to parse SSE payload:', dataStr, e)
+        }
+
+        if (eventType === 'meta') {
+          // backend sends snake_case keys; keep both for safety
+          conversationId = payload.conversation_id || payload.conversationId || conversationId
+          const sources = payload.sources || []
+          console.log('[SSE] Received meta event, sources:', sources.length)
+          // Force Vue reactivity by replacing the object
+          messages.value[msgIndex] = {
+            ...messages.value[msgIndex],
+            metadata: {
+              ...(messages.value[msgIndex].metadata || {}),
+              conversationId,
+              sources
+            }
+          }
+          return
+        }
+
+        if (eventType === 'delta') {
+          const delta = payload.delta ?? ''
+          fullContent += delta
+          // Force Vue reactivity by replacing the object
+          messages.value[msgIndex] = {
+            ...messages.value[msgIndex],
+            content: fullContent
+          }
+          return
+        }
+
+        if (eventType === 'done') {
+          updateConversation(conversationId, fullContent)
+          // Using an exception-free exit: we just mark a sentinel and let caller return
+          throw new Error('__STREAM_DONE__')
+        }
+
+        if (eventType === 'error') {
+          const errMsg = payload.error || '流式响应出错'
+          throw new Error(errMsg)
+        }
+      }
 
       while (true) {
         const { done, value } = await reader.read()
         
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
+        buffer += decoder.decode(value, { stream: true })
+        // Normalize CRLF to LF so splitting is consistent across proxies/platforms
+        buffer = buffer.replace(/\r\n/g, '\n')
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            
-            if (data === '[DONE]') {
-              // Stream ended
-              updateConversation(conversationId, fullContent)
-              return
-            }
-
-            // Accumulate content
-            fullContent += data
-            assistantMessage.content = fullContent
+        // Consume as many complete SSE events as possible.
+        // Each event ends with a blank line: "\n\n"
+        while (true) {
+          const idx = buffer.indexOf('\n\n')
+          if (idx === -1) break
+          const rawEvent = buffer.slice(0, idx)
+          buffer = buffer.slice(idx + 2)
+          try {
+            handleRawSseEvent(rawEvent)
+          } catch (e: any) {
+            if (e?.message === '__STREAM_DONE__') return
+            throw e
           }
+        }
+      }
+
+      // Flush any remaining complete events when stream closes
+      buffer = buffer.replace(/\r\n/g, '\n')
+      while (true) {
+        const idx = buffer.indexOf('\n\n')
+        if (idx === -1) break
+        const rawEvent = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        try {
+          handleRawSseEvent(rawEvent)
+        } catch (e: any) {
+          if (e?.message === '__STREAM_DONE__') return
+          throw e
         }
       }
     } finally {

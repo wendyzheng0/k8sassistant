@@ -4,7 +4,25 @@
 - 构建摄取流水线（文本切分、标题与关键词提取）
 - 初始化嵌入模型与 LLM（基于环境变量配置）
 - 在 Milvus 中创建向量索引
+
+@deprecated: 此模块已弃用，请使用新的流水线架构
+
+新的使用方式:
+    from data_processing.processors import PipelineRunner
+    
+    runner = PipelineRunner()
+    result = await runner.run(data_dir="./data/zh-cn", storage_backend="milvus")
+
+或使用命令行:
+    python -m data_processing.processors.cli --data-dir ./data/zh-cn --backend milvus
 """
+
+import warnings
+warnings.warn(
+    "processor.py is deprecated. Use 'from data_processing.processors import PipelineRunner' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import os
 from typing import List

@@ -4,9 +4,33 @@
 
 import sys
 import os
+import logging
 from pathlib import Path
 from loguru import logger
 from app.core.config import settings
+
+
+class InterceptHandler(logging.Handler):
+    """
+    拦截标准库 logging 的日志，重定向到 loguru
+    这样 shared 模块使用标准库 logging 写的日志也能被 loguru 捕获并输出
+    """
+    def emit(self, record: logging.LogRecord) -> None:
+        # 获取对应的 loguru level
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # 找到调用者的帧
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
 
 
 def setup_logging():
@@ -71,6 +95,10 @@ def setup_logging():
     
     # 设置日志级别
     logger.level(settings.LOG_LEVEL)
+    
+    # 拦截标准库 logging，重定向到 loguru
+    # 这样 shared 模块等使用标准库 logging 的代码也能正常输出日志
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
     
     return logger
 

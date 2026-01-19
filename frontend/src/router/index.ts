@@ -19,6 +19,14 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin',
+    name: 'Admin',
+    component: () => import('@/views/AdminView.vue'),
+    meta: {
+      title: '向量数据库管理'
+    }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/SettingsView.vue'),
