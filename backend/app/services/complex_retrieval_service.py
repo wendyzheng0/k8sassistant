@@ -1,5 +1,11 @@
 """
 复杂检索服务 - 结合 Milvus 向量数据库、Elasticsearch 和 CrossEncoder 重排序
+
+混合检索逻辑:
+1. Milvus: 向量检索（语义相似度）
+2. Elasticsearch: 关键字检索（BM25）
+3. RRF: 融合两路检索结果
+4. CrossEncoder: 精排重排序
 """
 
 import asyncio
@@ -8,11 +14,11 @@ import os
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import numpy as np
-from elasticsearch import Elasticsearch
-from elasticsearch.exceptions import ConnectionError as ESConnectionError
 from sentence_transformers import CrossEncoder
 from huggingface_hub import snapshot_download
 import torch
+
+from shared.data_access import ElasticsearchClient, ElasticsearchConfig
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -65,9 +71,12 @@ class RRFReranker:
         """
         使用 RRF 算法重排序结果
         
+        基于统一的 doc_id (格式: relative_path#chunk_index) 进行融合，
+        确保 Milvus 和 Elasticsearch 返回的相同分块能够正确匹配。
+        
         Args:
-            milvus_results: Milvus 搜索结果
-            elasticsearch_results: Elasticsearch 搜索结果
+            milvus_results: Milvus 搜索结果（包含 doc_id 字段）
+            elasticsearch_results: Elasticsearch 搜索结果（包含 doc_id 字段）
             
         Returns:
             重排序后的结果列表
@@ -75,22 +84,28 @@ class RRFReranker:
         try:
             self.logger.info(f"🔄 Starting RRF reranking with k={self.k}")
             
-            # 创建文档ID到RRF分数的映射
+            # 创建 doc_id 到 RRF 分数的映射
+            # 使用 doc_id (relative_path#chunk_index) 作为统一标识符进行融合
             doc_scores = {}
             
             # 处理 Milvus 结果
             for rank, doc in enumerate(milvus_results):
-                doc_id = doc.get('id')
+                # 优先使用 doc_id 进行融合，确保与 ES 的分块能够匹配
+                doc_id = doc.get('doc_id') or doc.get('id')
                 if doc_id:
                     if doc_id not in doc_scores:
                         doc_scores[doc_id] = {
-                            'id': doc_id,
+                            'id': doc.get('id', doc_id),  # 保留原始 id
+                            'doc_id': doc_id,  # 统一的 doc_id
                             'content': doc.get('content', ''),
                             'metadata': doc.get('metadata', {}),
                             'file_path': doc.get('file_path', ''),
+                            'chunk_index': doc.get('chunk_index', 0),
                             'rrf_score': 0.0,
                             'milvus_rank': rank + 1,
+                            'milvus_score': doc.get('score', 0.0),
                             'elasticsearch_rank': None,
+                            'elasticsearch_score': None,
                             'sources': []
                         }
                     
@@ -101,21 +116,27 @@ class RRFReranker:
             
             # 处理 Elasticsearch 结果
             for rank, doc in enumerate(elasticsearch_results):
-                doc_id = doc.get('id')
+                # 使用 doc_id 进行融合
+                doc_id = doc.get('doc_id') or doc.get('id')
                 if doc_id:
                     if doc_id not in doc_scores:
                         doc_scores[doc_id] = {
-                            'id': doc_id,
+                            'id': doc.get('id', doc_id),
+                            'doc_id': doc_id,
                             'content': doc.get('content', ''),
                             'metadata': {},
                             'file_path': doc.get('file_path', ''),
+                            'chunk_index': doc.get('chunk_index', 0),
                             'rrf_score': 0.0,
                             'milvus_rank': None,
+                            'milvus_score': None,
                             'elasticsearch_rank': rank + 1,
+                            'elasticsearch_score': doc.get('score', 0.0),
                             'sources': []
                         }
                     else:
                         doc_scores[doc_id]['elasticsearch_rank'] = rank + 1
+                        doc_scores[doc_id]['elasticsearch_score'] = doc.get('score', 0.0)
                     
                     # 计算 RRF 分数：1 / (k + rank)
                     rrf_score = 1.0 / (self.k + rank + 1)
@@ -130,7 +151,12 @@ class RRFReranker:
             reranked_results = list(doc_scores.values())
             reranked_results.sort(key=lambda x: x['rrf_score'], reverse=True)
             
-            self.logger.info(f"✅ RRF reranking completed, processed {len(reranked_results)} documents")
+            # 统计融合效果
+            both_sources = sum(1 for r in reranked_results if len(r.get('sources', [])) == 2)
+            self.logger.info(
+                f"✅ RRF reranking completed: {len(reranked_results)} unique docs, "
+                f"{both_sources} matched in both sources"
+            )
             return reranked_results
             
         except Exception as e:
@@ -238,50 +264,60 @@ class CrossEncoderReranker:
 
 
 class ElasticsearchService:
-    """Elasticsearch 服务"""
+    """
+    Elasticsearch 关键字检索服务
+    使用 shared.data_access.ElasticsearchClient 进行关键字检索
+    """
     
     def __init__(self):
         self.logger = get_logger("ElasticsearchService")
-        self.client: Optional[Elasticsearch] = None
         self.index_name = getattr(settings, 'ELASTICSEARCH_INDEX', 'k8s-docs')
         self.host = getattr(settings, 'ELASTICSEARCH_HOST', 'http://localhost:9200')
-        self.username = getattr(settings, 'ELASTICSEARCH_USER', 'elastic')
-        self.password = getattr(settings, 'ELASTICSEARCH_PASSWORD', 'password')
-        self.ca_certs = getattr(settings, 'ELASTICSEARCH_CA_CERTS', None)
+        
+        # 创建配置
+        self._config = ElasticsearchConfig(
+            es_url=self.host,
+            index_name=self.index_name,
+            username=getattr(settings, 'ELASTICSEARCH_USER', 'elastic'),
+            password=getattr(settings, 'ELASTICSEARCH_PASSWORD', 'password'),
+            request_timeout=getattr(settings, 'ELASTICSEARCH_REQUEST_TIMEOUT', 10.0),
+            max_retries=getattr(settings, 'ELASTICSEARCH_MAX_RETRIES', 2),
+            retry_on_timeout=getattr(settings, 'ELASTICSEARCH_RETRY_ON_TIMEOUT', True),
+            enable_highlight=getattr(settings, 'ELASTICSEARCH_ENABLE_HIGHLIGHT', True),
+            enable_fuzziness=getattr(settings, 'ELASTICSEARCH_ENABLE_FUZZINESS', True),
+        )
+        
+        # 创建共享客户端
+        self._client: Optional[ElasticsearchClient] = None
+    
+    @property
+    def client(self):
+        """向后兼容：获取底层客户端"""
+        return self._client._client if self._client else None
     
     async def initialize(self):
         """初始化 Elasticsearch 连接"""
         try:
-            self.logger.info(f"🔄 Connecting to Elasticsearch: {self.host}")
+            self.logger.info(
+                f"🔄 Connecting to Elasticsearch: {self.host} "
+                f"(index={self.index_name})"
+            )
             
-            # 构建连接参数
-            connection_params = {
-                'hosts': [self.host],
-                'basic_auth': (self.username, self.password)
-            }
+            self._client = ElasticsearchClient(self._config)
+            await self._client.initialize(for_storage=False)  # 用于检索
             
-            if self.ca_certs and os.path.exists(self.ca_certs):
-                connection_params['ca_certs'] = self.ca_certs
-            
-            self.client = Elasticsearch(**connection_params)
-            
-            # 测试连接
-            info = self.client.info()
-            self.logger.info(f"✅ Connected to Elasticsearch: {info.get('version', {}).get('number', 'unknown')}")
+            if self._client.is_connected():
+                self.logger.info(f"✅ Connected to Elasticsearch")
+            else:
+                self.logger.warning("⚠️ Elasticsearch not connected, keyword search will be unavailable")
             
         except Exception as e:
             self.logger.error(f"❌ Failed to connect to Elasticsearch: {e}")
-            self.logger.error(f"   Host: {self.host}, Index: {self.index_name}")
-            self.logger.error("   The system will continue with vector-only search, but retrieval quality may be reduced.")
-            self.logger.error("   Please check:")
-            self.logger.error("   1. Elasticsearch service is running")
-            self.logger.error("   2. Connection credentials are correct")
-            self.logger.error("   3. Network connectivity to Elasticsearch host")
-            self.client = None
+            self.logger.error("   The system will continue with vector-only search")
     
     async def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """
-        在 Elasticsearch 中搜索
+        在 Elasticsearch 中进行关键字搜索
         
         Args:
             query: 搜索查询
@@ -290,59 +326,13 @@ class ElasticsearchService:
         Returns:
             搜索结果列表
         """
-        if not self.client:
+        if not self._client or not self._client.is_connected():
             self.logger.warning("⚠️ Elasticsearch client not initialized - falling back to vector-only search")
-            self.logger.warning(f"   Elasticsearch host: {self.host}, index: {self.index_name}")
-            self.logger.warning("   This may reduce retrieval quality. Please check Elasticsearch connection.")
             return []
         
         try:
-            # 构建搜索查询
-            search_body = {
-                "query": {
-                    "multi_match": {
-                        "query": query,
-                        "fields": ["text^2", "file_path"],
-                        "type": "best_fields",
-                        "fuzziness": "AUTO"
-                    }
-                },
-                "size": top_k,
-                "_source": ["text", "file_path", "chunk_index"],
-                "highlight": {
-                    "fields": {
-                        "text": {
-                            "fragment_size": 150,
-                            "number_of_fragments": 3
-                        }
-                    }
-                }
-            }
-            
-            # 执行搜索
-            response = self.client.search(
-                index=self.index_name,
-                body=search_body
-            )
-            
-            # 处理结果
-            results = []
-            for hit in response['hits']['hits']:
-                source = hit['_source']
-                highlight = hit.get('highlight', {})
-                
-                result = {
-                    'id': hit['_id'],
-                    'content': source.get('text', ''),
-                    'file_path': source.get('file_path', ''),
-                    'chunk_index': source.get('chunk_index', 0),
-                    'score': hit['_score'],
-                    'source': 'elasticsearch',
-                    'highlights': highlight.get('text', [])
-                }
-                results.append(result)
-            
-            self.logger.info(f"✅ Elasticsearch search completed, found {len(results)} results, requested {top_k}")
+            results = await self._client.text_search(query, top_k)
+            self.logger.info(f"✅ Elasticsearch search completed, found {len(results)} results")
             return results
             
         except Exception as e:
@@ -352,8 +342,8 @@ class ElasticsearchService:
     async def close(self):
         """关闭连接"""
         try:
-            if self.client:
-                self.client.close()
+            if self._client:
+                await self._client.close()
             self.logger.info("✅ Elasticsearch connection closed")
         except Exception as e:
             self.logger.error(f"❌ Failed to close Elasticsearch connection: {e}")
@@ -472,13 +462,18 @@ class ContextualCompressionRetriever:
             # 格式化结果
             milvus_results = []
             for doc in similar_docs:
+                # 获取统一的 doc_id（用于 reranker 融合）
+                doc_id = doc.get('doc_id') or doc.get('id')
+                
                 milvus_results.append({
                     'id': doc.get('id'),
+                    'doc_id': doc_id,  # 统一的 doc_id 用于 reranker 融合
                     'content': doc.get('content'),
                     'metadata': doc.get('metadata', {}),
                     'score': doc.get('score', 0.0),
                     'source': 'milvus',
                     'file_path': doc.get('file_path', ''),
+                    'chunk_index': doc.get('chunk_index', 0),
                     'distance': doc.get('distance', 0.0)
                 })
             
@@ -520,21 +515,28 @@ class ContextualCompressionRetriever:
         milvus_weight: float,
         elasticsearch_weight: float
     ) -> List[Dict[str, Any]]:
-        """合并和去重结果"""
+        """
+        合并和去重结果
+        
+        基于统一的 doc_id (格式: relative_path#chunk_index) 进行融合
+        """
         try:
-            # 创建文档ID到结果的映射
+            # 创建 doc_id 到结果的映射
             doc_map = {}
             
             # 处理 Milvus 结果
             for result in milvus_results:
-                doc_id = result.get('id')
+                # 使用 doc_id 进行融合
+                doc_id = result.get('doc_id') or result.get('id')
                 if doc_id:
                     if doc_id not in doc_map:
                         doc_map[doc_id] = {
-                            'id': doc_id,
+                            'id': result.get('id', doc_id),
+                            'doc_id': doc_id,
                             'content': result.get('content', ''),
                             'metadata': result.get('metadata', {}),
                             'file_path': result.get('file_path', ''),
+                            'chunk_index': result.get('chunk_index', 0),
                             'milvus_score': 0.0,
                             'elasticsearch_score': 0.0,
                             'combined_score': 0.0,
@@ -546,14 +548,17 @@ class ContextualCompressionRetriever:
             
             # 处理 Elasticsearch 结果
             for result in elasticsearch_results:
-                doc_id = result.get('id')
+                # 使用 doc_id 进行融合
+                doc_id = result.get('doc_id') or result.get('id')
                 if doc_id:
                     if doc_id not in doc_map:
                         doc_map[doc_id] = {
-                            'id': doc_id,
+                            'id': result.get('id', doc_id),
+                            'doc_id': doc_id,
                             'content': result.get('content', ''),
                             'metadata': {},
                             'file_path': result.get('file_path', ''),
+                            'chunk_index': result.get('chunk_index', 0),
                             'milvus_score': 0.0,
                             'elasticsearch_score': 0.0,
                             'combined_score': 0.0,
@@ -586,7 +591,13 @@ class ContextualCompressionRetriever:
             # 按组合分数排序
             combined_results.sort(key=lambda x: x['combined_score'], reverse=True)
             
-            self.logger.info(f"✅ Combined {len(milvus_results)} Milvus and {len(elasticsearch_results)} Elasticsearch results into {len(combined_results)} unique documents")
+            # 统计融合效果
+            both_sources = sum(1 for r in combined_results if len(r.get('sources', [])) == 2)
+            self.logger.info(
+                f"✅ Combined {len(milvus_results)} Milvus and {len(elasticsearch_results)} "
+                f"Elasticsearch results into {len(combined_results)} unique documents "
+                f"({both_sources} matched in both sources)"
+            )
             return combined_results
             
         except Exception as e:

@@ -1,3 +1,23 @@
+"""
+@deprecated: 此模块已弃用，请使用新的流水线架构
+
+新的使用方式:
+    from data_processing.processors import PipelineRunner
+    
+    runner = PipelineRunner()
+    result = await runner.run(data_dir="./data/zh-cn", storage_backend="milvus")
+
+或使用命令行:
+    python -m data_processing.processors.cli --data-dir ./data/zh-cn --backend milvus
+"""
+
+import warnings
+warnings.warn(
+    "dataloader.py is deprecated. Use 'from data_processing.processors import PipelineRunner' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
 import os
 import sys
 import tempfile
@@ -24,15 +44,16 @@ from llama_index.core import (
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.vector_stores.milvus import MilvusVectorStore
-# from sentence_transformers import SentenceTransformer
 from bs4 import BeautifulSoup
 from pymilvus import MilvusClient
-from huggingface_hub import snapshot_download
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from milvus_lite.server import Server
 import data_cleaner
 from code_extractor import CodeExtractor
-from bge_onnx_llama_wrapper import BGEOpenXEmbedding
+
+# Add project root to path for shared module imports
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 
 if os.path.exists('../../.env'):
@@ -48,68 +69,22 @@ milvus_server = None
 
 
 def init_embed_model():
-    # 从环境变量或配置读取设置
-    hf_endpoint = os.getenv("HF_ENDPOINT", "https://hf-mirror.com")
-    hf_base_url = os.getenv("HUGGINGFACE_HUB_BASE_URL", "https://hf-mirror.com")
-    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
-    device = os.getenv("EMBEDDING_DEVICE", "cpu")
-    backend = os.getenv("EMBEDDING_BACKEND", "torch")  # torch, onnx, openvino
-    cache_dir = os.getenv("EMBEDDING_CACHE_DIR", "hf_cache")
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'hf_cache')
+    """
+    Initialize embedding model using shared embedding module
+    The shared module handles model downloading automatically
+    """
+    from shared.embeddings import create_embedding_service
     
-    # 初始化嵌入模型
-    model_path = model_name
-    # 检查是否有本地模型目录
-    local_dir = os.getenv("EMBEDDING_LOCAL_DIR", "").strip()
-    if local_dir and os.path.isdir(local_dir):
-        model_path = local_dir
-        print(f"Using local model: {model_path}")
-    else:
-        # 如果没有本地模型，尝试HuggingFace的缓存或下载
-        if not os.path.exists(cache_dir):
-            os.mkdir(cache_dir)
-        print(f"Trying to download {model_name} to {cache_dir} from {hf_endpoint}")
-        model_path = snapshot_download(
-            model_name,
-            endpoint=hf_endpoint,
-            cache_dir=cache_dir
-        )
-        print(f"model downloaded to {model_path}")
+    print("🔄 Initializing embedding model using shared module...")
     
-    print(f"Create embedding model")
-    print(f"model_path: {model_path}")
-    print(f"device: {device}")
-    print(f"backend: {backend}")
+    # Create embedding service using shared module
+    # It automatically handles model downloading, caching, and initialization
+    embedding_service = create_embedding_service(use_singleton=True)
     
-    # 根据后端类型初始化模型
-    if backend == "onnx":
-        # 检查ONNX模型路径
-        onnx_path = os.path.join(model_path, "onnx", "model.onnx")
-        if not os.path.exists(onnx_path):
-            print(f"ONNX model path not found: {onnx_path}")
-            print("Falling back to PyTorch backend")
-            # 回退到PyTorch后端
-            Settings.embed_model = HuggingFaceEmbedding(
-                model_name=model_path,
-                device=device,
-                backend="torch"
-            )
-        else:
-            # 使用我们的BGE ONNX包装器
-            print("Using BGE ONNX embedding model")
-            Settings.embed_model = BGEOpenXEmbedding(
-                model_path=model_path,
-                device=device,
-                cache_dir=cache_dir,
-                batch_size=128
-            )
-    else:
-        # PyTorch后端（默认）
-        Settings.embed_model = HuggingFaceEmbedding(
-            model_name=model_path,
-            device=device,
-            backend="torch"
-        )
+    # Set the underlying model as llama-index's embed_model
+    Settings.embed_model = embedding_service.model
+    
+    print(f"✅ Embedding model initialized: {embedding_service.get_model_info()}")
 
 
 def init_llm():
@@ -388,7 +363,7 @@ def main():
         return 1
     
     try:
-        print("🔧 Initializing embedding model...")
+        print("🔧 Initializing embedding model (using shared module)...")
         init_embed_model()
         print("🔧 Initializing LLM...")
         init_llm()

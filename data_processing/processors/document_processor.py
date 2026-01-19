@@ -1,6 +1,25 @@
 """
 文档处理器 - 文本分割和向量化
+Uses shared modules for embedding and configuration
+
+@deprecated: 此模块已弃用，请使用新的流水线架构
+
+新的使用方式:
+    from data_processing.processors import PipelineRunner
+    
+    runner = PipelineRunner()
+    result = await runner.run(data_dir="./data/zh-cn", storage_backend="milvus")
+
+或使用命令行:
+    python -m data_processing.processors.cli --data-dir ./data/zh-cn --backend milvus
 """
+
+import warnings
+warnings.warn(
+    "document_processor.py is deprecated. Use 'from data_processing.processors import PipelineRunner' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 import os
 import sys
@@ -10,101 +29,219 @@ import argparse
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-# 在导入任何模块之前设置环境变量
-def set_environment_variables(milvus_uri: str = None, collection_name: str = None, chunk_size: int = None, chunk_overlap: int = None):
-    """设置环境变量，必须在导入任何模块之前调用"""
-    if milvus_uri:
-        os.environ["MILVUS_URI"] = milvus_uri
-        print(f'✅ 设置 MILVUS_URI: {milvus_uri}')
-    if collection_name:
-        os.environ["COLLECTION_NAME"] = collection_name
-        print(f'✅ 设置 COLLECTION_NAME: {collection_name}')
-    if chunk_size:
-        os.environ["CHUNK_SIZE"] = str(chunk_size)
-        print(f'✅ 设置 CHUNK_SIZE: {chunk_size}')
-    if chunk_overlap:
-        os.environ["CHUNK_OVERLAP"] = str(chunk_overlap)
-        print(f'✅ 设置 CHUNK_OVERLAP: {chunk_overlap}')
+# Add project root to path for shared module imports
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# 解析命令行参数
-def parse_arguments():
-    """解析命令行参数"""
-    parser = argparse.ArgumentParser(description="K8s Assistant 文档处理器")
-    parser.add_argument(
-        "--milvus-uri", 
-        default="http://localhost:19530",
-        help="Milvus 服务地址 (默认: http://localhost:19530)"
-    )
-    parser.add_argument(
-        "--collection-name", 
-        default="k8s_docs",
-        help="集合名称 (默认: k8s_docs)"
-    )
-    parser.add_argument(
-        "--docs-dir", 
-        default="docs",
-        help="文档目录路径 (默认: docs)"
-    )
-    parser.add_argument(
-        "--chunk-size",
-        type=int,
-        default=512,
-        help="文本块大小 (默认: 512)"
-    )
-    parser.add_argument(
-        "--chunk-overlap",
-        type=int,
-        default=50,
-        help="文本块重叠大小 (默认: 50)"
-    )
-    parser.add_argument(
-        "--single-file",
-        help="处理单个文件"
-    )
-    return parser.parse_args()
+from dotenv import load_dotenv
 
-# 获取命令行参数并设置环境变量
-args = parse_arguments()
-set_environment_variables(
-    milvus_uri=args.milvus_uri,
-    collection_name=args.collection_name,
-    chunk_size=args.chunk_size,
-    chunk_overlap=args.chunk_overlap
-)
-
-# 现在导入项目模块（环境变量已经设置）
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
+# Load environment variables
+env_path = os.path.join(project_root, ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path)
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-from app.services.embedding_service import EmbeddingService
-from app.services.milvus_service import MilvusService
-from app.core.config import settings
-from app.core.logging import get_logger
+
+# Import from shared modules
+from shared.config import get_settings
+from shared.embeddings import create_embedding_service, EmbeddingService
+
+
+# Simple logger for data processing
+import logging
+
+def get_logger(name: str) -> logging.Logger:
+    """Get a configured logger"""
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        ))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    return logger
+
 
 logger = get_logger("DocumentProcessor")
 
 
-class DocumentProcessor:
-    """文档处理器"""
+class MilvusServiceWrapper:
+    """
+    Wrapper for Milvus operations
+    Uses pymilvus directly instead of backend service
+    """
     
-    def __init__(self):
-        self.embedding_service = EmbeddingService()
-        self.milvus_service = MilvusService()
+    def __init__(self, uri: str, collection_name: str, vector_dim: int):
+        self.uri = uri
+        self.collection_name = collection_name
+        self.vector_dim = vector_dim
+        self.client = None
+        self.logger = get_logger("MilvusServiceWrapper")
+    
+    async def initialize(self):
+        """Initialize Milvus connection"""
+        from pymilvus import MilvusClient, connections, Collection, CollectionSchema, FieldSchema, DataType
+        from urllib.parse import urlparse
         
-        # 创建文本分割器
+        try:
+            # Parse URI
+            raw_uri = self.uri.strip()
+            if "://" in raw_uri:
+                parsed = urlparse(raw_uri)
+                host = parsed.hostname
+                port = parsed.port
+                client_uri = f"{parsed.scheme}://{host}:{port}"
+            else:
+                if ":" not in raw_uri:
+                    raise ValueError(f"Invalid MILVUS_URI (missing port): {raw_uri}")
+                host, port_str = raw_uri.rsplit(":", 1)
+                port = int(port_str)
+                client_uri = f"http://{host}:{port}"
+            
+            # Connect to Milvus
+            self.logger.info(f"Connecting to Milvus: {host}:{port}")
+            connections.connect(alias="default", host=host, port=port)
+            
+            # Create MilvusClient
+            self.client = MilvusClient(uri=client_uri, token="")
+            
+            # Ensure collection exists
+            await self._ensure_collection_exists()
+            
+            self.logger.info(f"✅ Milvus connection initialized: {self.uri}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize Milvus: {e}")
+            raise
+    
+    async def _ensure_collection_exists(self):
+        """Ensure collection exists"""
+        from pymilvus import Collection, CollectionSchema, FieldSchema, DataType
+        
+        collections = self.client.list_collections()
+        
+        if self.collection_name not in collections:
+            # Create collection
+            fields = [
+                FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=65535, is_primary=True),
+                FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
+                FieldSchema(name="metadata", dtype=DataType.JSON),
+                FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self.vector_dim)
+            ]
+            
+            schema = CollectionSchema(
+                fields=fields,
+                description="K8s 文档向量存储"
+            )
+            
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                schema=schema
+            )
+            
+            # Create index
+            collection = Collection(self.collection_name)
+            collection.create_index(
+                field_name="embedding",
+                index_params={
+                    "index_type": "IVF_FLAT",
+                    "metric_type": "COSINE",
+                    "params": {"nlist": 1024}
+                }
+            )
+            collection.load()
+            
+            self.logger.info(f"✅ Created collection: {self.collection_name}")
+        else:
+            collection = Collection(self.collection_name)
+            collection.load()
+            self.logger.info(f"✅ Collection already exists: {self.collection_name}")
+    
+    async def insert_documents(self, documents: List[Dict[str, Any]]):
+        """Insert documents into vector database"""
+        if not documents:
+            self.logger.warning("⚠️ No documents to insert")
+            return
+        
+        data = []
+        for doc in documents:
+            if not doc.get("id") or not doc.get("content") or not doc.get("embedding"):
+                continue
+            data.append({
+                "id": doc["id"],
+                "content": doc["content"],
+                "metadata": doc.get("metadata", {}),
+                "embedding": doc["embedding"]
+            })
+        
+        if data:
+            self.client.insert(
+                collection_name=self.collection_name,
+                data=data
+            )
+            self.logger.info(f"✅ Successfully inserted {len(data)} documents")
+    
+    async def close(self):
+        """Close connection"""
+        from pymilvus import connections
+        try:
+            if self.client:
+                self.client.close()
+            connections.disconnect("default")
+            self.logger.info("✅ Milvus connection closed")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to close Milvus connection: {e}")
+
+
+class DocumentProcessor:
+    """文档处理器 - 使用shared模块"""
+    
+    def __init__(
+        self,
+        milvus_uri: str = None,
+        collection_name: str = None,
+        chunk_size: int = None,
+        chunk_overlap: int = None
+    ):
+        # Get settings
+        settings = get_settings()
+        
+        # Use provided values or defaults from settings
+        self.milvus_uri = milvus_uri or os.getenv("MILVUS_URI", settings.MILVUS_URI)
+        self.collection_name = collection_name or os.getenv("COLLECTION_NAME", settings.COLLECTION_NAME)
+        self.chunk_size = chunk_size or int(os.getenv("CHUNK_SIZE", str(settings.CHUNK_SIZE)))
+        self.chunk_overlap = chunk_overlap or int(os.getenv("CHUNK_OVERLAP", str(settings.CHUNK_OVERLAP)))
+        
+        # Initialize embedding service using shared module
+        self.embedding_service = create_embedding_service(use_singleton=True)
+        
+        # Get vector dimension from embedding service
+        self.vector_dim = self.embedding_service.get_embedding_dimension()
+        
+        # Initialize Milvus wrapper
+        self.milvus_service = MilvusServiceWrapper(
+            uri=self.milvus_uri,
+            collection_name=self.collection_name,
+            vector_dim=self.vector_dim
+        )
+        
+        # Create text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.CHUNK_SIZE,
-            chunk_overlap=settings.CHUNK_OVERLAP,
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
             length_function=len,
             separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]
         )
         
         print(f'🔧 当前配置:')
-        print(f'   - MILVUS_URI: {settings.MILVUS_URI}')
-        print(f'   - COLLECTION_NAME: {settings.COLLECTION_NAME}')
-        print(f'   - CHUNK_SIZE: {settings.CHUNK_SIZE}')
-        print(f'   - CHUNK_OVERLAP: {settings.CHUNK_OVERLAP}')
+        print(f'   - MILVUS_URI: {self.milvus_uri}')
+        print(f'   - COLLECTION_NAME: {self.collection_name}')
+        print(f'   - CHUNK_SIZE: {self.chunk_size}')
+        print(f'   - CHUNK_OVERLAP: {self.chunk_overlap}')
+        print(f'   - VECTOR_DIM: {self.vector_dim}')
     
     async def initialize(self):
         """初始化服务"""
@@ -182,7 +319,7 @@ class DocumentProcessor:
         
         # 尝试从内容中提取标题
         lines = content.split('\n')
-        for line in lines[:10]:  # 只检查前10行
+        for line in lines[:10]:
             line = line.strip()
             if line.startswith('# '):
                 metadata["title"] = line[2:].strip()
@@ -221,7 +358,7 @@ class DocumentProcessor:
         """向量化并存储文本块"""
         logger.info("🔄 开始向量化文本块...")
         
-        # 批量编码
+        # 批量编码 using shared embedding service
         texts = [chunk["content"] for chunk in chunks]
         embeddings = self.embedding_service.encode_batch(texts, batch_size=32)
         
@@ -267,9 +404,53 @@ class DocumentProcessor:
         await self.milvus_service.close()
 
 
+def parse_arguments():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="K8s Assistant 文档处理器")
+    parser.add_argument(
+        "--milvus-uri", 
+        default="http://localhost:19530",
+        help="Milvus 服务地址 (默认: http://localhost:19530)"
+    )
+    parser.add_argument(
+        "--collection-name", 
+        default="k8s_docs",
+        help="集合名称 (默认: k8s_docs)"
+    )
+    parser.add_argument(
+        "--docs-dir", 
+        default="docs",
+        help="文档目录路径 (默认: docs)"
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=512,
+        help="文本块大小 (默认: 512)"
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=50,
+        help="文本块重叠大小 (默认: 50)"
+    )
+    parser.add_argument(
+        "--single-file",
+        help="处理单个文件"
+    )
+    return parser.parse_args()
+
+
 async def main():
     """主函数"""
-    processor = DocumentProcessor()
+    args = parse_arguments()
+    
+    processor = DocumentProcessor(
+        milvus_uri=args.milvus_uri,
+        collection_name=args.collection_name,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap
+    )
     
     try:
         await processor.initialize()

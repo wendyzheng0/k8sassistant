@@ -42,6 +42,28 @@ class Settings(BaseSettings):
     ELASTICSEARCH_USER: str = "elastic"
     ELASTICSEARCH_PASSWORD: str = "password"
     ELASTICSEARCH_CA_CERTS: str = ""  # 留空，让代码自动检测证书路径
+    # Elasticsearch 网络与重试配置
+    # request_timeout: 单次请求的总超时时间（秒）。如果 ES 压力大/网络抖动，适当调大。
+    ELASTICSEARCH_REQUEST_TIMEOUT: float = 10.0
+    # max_retries + retry_on_timeout: 在超时场景下自动重试，提升偶发网络抖动的可用性
+    ELASTICSEARCH_MAX_RETRIES: int = 2
+    ELASTICSEARCH_RETRY_ON_TIMEOUT: bool = True
+    # Elasticsearch 查询性能相关配置
+    # 服务端 search timeout（如 "8s"）。留空则不设置，让 ES 自己跑完；建议配合较大的 request_timeout 使用。
+    ELASTICSEARCH_SEARCH_TIMEOUT: str = ""
+    # 是否开启高亮（高亮通常比较耗时，尤其 top_k 大时）
+    ELASTICSEARCH_ENABLE_HIGHLIGHT: bool = True
+    # 当 top_k 超过该值时自动关闭高亮（避免 50 条高亮导致响应过慢）
+    ELASTICSEARCH_HIGHLIGHT_MAX_TOP_K: int = 20
+    # 是否启用模糊匹配（fuzziness 会明显增加查询开销）
+    ELASTICSEARCH_ENABLE_FUZZINESS: bool = True
+    # 当 query token 数超过该值时自动关闭 fuzziness（长 query 用 fuzziness 代价太高）
+    ELASTICSEARCH_FUZZINESS_MAX_TOKENS: int = 8
+    # fuzziness 的扩展与前缀参数（用于控制开销）
+    ELASTICSEARCH_FUZZINESS_MAX_EXPANSIONS: int = 50
+    ELASTICSEARCH_FUZZINESS_PREFIX_LENGTH: int = 1
+    # 不需要总命中数时关闭，可减少额外开销
+    ELASTICSEARCH_TRACK_TOTAL_HITS: bool = False
     
     # LLM 配置
     LLM_API_KEY: str = ""  # 必需配置

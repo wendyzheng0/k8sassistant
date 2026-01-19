@@ -14,6 +14,14 @@
         </el-button>
       </div>
       
+      <!-- Navigation -->
+      <div class="sidebar-nav">
+        <router-link to="/admin" class="nav-link">
+          <el-icon><Setting /></el-icon>
+          <span>向量数据库管理</span>
+        </router-link>
+      </div>
+      
       <div class="sidebar-content">
         <el-menu
           :default-active="currentConversationId"
@@ -121,8 +129,8 @@
             </div>
           </div>
 
-          <!-- Loading state -->
-          <div v-if="isLoading || isStreaming" class="message message-assistant">
+          <!-- Loading state (avoid duplicating the streaming assistant message placeholder) -->
+          <div v-if="isLoading && !isStreaming" class="message message-assistant">
             <div class="message-avatar">
               <el-avatar :icon="Service" :size="32" />
             </div>
@@ -186,7 +194,8 @@ import {
   Loading, 
   Promotion, 
   VideoPlay,
-  ArrowRight
+  ArrowRight,
+  Setting
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
@@ -330,6 +339,32 @@ onMounted(() => {
   margin: 0;
   color: #303133;
   font-size: 18px;
+}
+
+.sidebar-nav {
+  padding: 10px 15px;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: #606266;
+  text-decoration: none;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.nav-link:hover {
+  background-color: #f0f2f5;
+  color: #409eff;
+}
+
+.nav-link .el-icon {
+  font-size: 16px;
 }
 
 .sidebar-content {

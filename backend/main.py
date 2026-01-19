@@ -2,13 +2,19 @@
 K8s Assistant - FastAPI 主应用入口
 """
 
+import sys
+import os
+
+# Add project root to path for shared module imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from contextlib import asynccontextmanager
-import os
 
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -17,9 +23,6 @@ from app.services.milvus_service import MilvusService
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
 from app.services.complex_retrieval_service import ComplexRetrievalService
-# from app.services.graph_construction_service import GraphConstructionService
-# from app.services.hybrid_retrieval_service import HybridRetrievalService
-# from app.services.enhanced_llm_service import EnhancedLLMService
 
 
 @asynccontextmanager
@@ -37,29 +40,22 @@ async def lifespan(app: FastAPI):
         await app.state.milvus_service.initialize()
         app.state.logger.info("✅ Milvus connection initialized successfully")
         
-        # 初始化嵌入服务
+        # 初始化嵌入服务 (now using shared module)
         app.state.embedding_service = EmbeddingService()
         app.state.logger.info("✅ Embedding service initialized successfully")
         
-        # 初始化 LLM 服务
+        # 初始化 LLM 服务 (now using shared LLM provider)
         app.state.llm_service = LLMService()
+        await app.state.llm_service.initialize()
         app.state.logger.info("✅ LLM service initialized successfully")
         
         # 初始化复杂检索服务
         app.state.complex_retrieval_service = ComplexRetrievalService()
+        await app.state.complex_retrieval_service.initialize()
         app.state.logger.info("✅ Complex retrieval service initialized successfully")
         
-        # # 初始化图构建服务
-        # app.state.graph_construction_service = GraphConstructionService()
-        # app.state.logger.info("✅ Graph construction service initialized successfully")
-        
-        # # 初始化混合检索服务
-        # app.state.hybrid_retrieval_service = HybridRetrievalService()
-        # app.state.logger.info("✅ Hybrid retrieval service initialized successfully")
-        
-        # # 初始化增强LLM服务
-        # app.state.enhanced_llm_service = EnhancedLLMService()
-        # app.state.logger.info("✅ Enhanced LLM service initialized successfully")
+        app.state.logger.info("✅ All services initialized successfully")
+        app.state.logger.info("📋 Using shared LLM providers and embedding services")
         
     except Exception as e:
         app.state.logger.error(f"❌ Failed to initialize services: {e}")
@@ -68,20 +64,17 @@ async def lifespan(app: FastAPI):
     yield
     
     # 关闭时清理
+    app.state.logger.info("🔄 Shutting down services...")
+    
     if hasattr(app.state, 'milvus_service'):
         await app.state.milvus_service.close()
+    if hasattr(app.state, 'llm_service'):
+        await app.state.llm_service.close()
+    if hasattr(app.state, 'complex_retrieval_service'):
+        await app.state.complex_retrieval_service.close()
     if hasattr(app.state, 'embedding_service'):
         del app.state.embedding_service
-    if hasattr(app.state, 'llm_service'):
-        del app.state.llm_service
-    if hasattr(app.state, 'complex_retrieval_service'):
-        del app.state.complex_retrieval_service
-    if hasattr(app.state, 'graph_construction_service'):
-        del app.state.graph_construction_service
-    if hasattr(app.state, 'hybrid_retrieval_service'):
-        del app.state.hybrid_retrieval_service
-    if hasattr(app.state, 'enhanced_llm_service'):
-        del app.state.enhanced_llm_service
+        
     app.state.logger.info("👋 K8s Assistant closed")
 
 
@@ -114,8 +107,6 @@ def create_app() -> FastAPI:
     if os.path.isdir(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
     
-    # 使用 FastAPI 默认的 Swagger UI 与 ReDoc（CDN 资源）
-    
     # 健康检查
     @app.get("/health")
     async def health_check():
@@ -123,6 +114,26 @@ def create_app() -> FastAPI:
             "status": "healthy",
             "app": settings.APP_NAME,
             "version": settings.APP_VERSION
+        }
+    
+    # 服务信息端点
+    @app.get("/info")
+    async def service_info():
+        """Get service information including architecture details"""
+        from shared.llm_providers import get_available_providers
+        from shared.config import get_settings
+        
+        shared_settings = get_settings()
+        
+        return {
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "architecture": {
+                "llm_provider": shared_settings.LLM_PROVIDER,
+                "available_providers": get_available_providers(),
+                "embedding_model": shared_settings.EMBEDDING_MODEL,
+                "embedding_backend": shared_settings.EMBEDDING_BACKEND
+            }
         }
     
     return app

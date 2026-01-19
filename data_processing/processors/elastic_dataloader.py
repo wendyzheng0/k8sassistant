@@ -1,3 +1,23 @@
+"""
+@deprecated: 此模块已弃用，请使用新的流水线架构
+
+新的使用方式:
+    from data_processing.processors import PipelineRunner
+    
+    runner = PipelineRunner()
+    result = await runner.run(data_dir="./data/zh-cn", storage_backend="elasticsearch")
+
+或使用命令行:
+    python -m data_processing.processors.cli --data-dir ./data/zh-cn --backend elasticsearch
+"""
+
+import warnings
+warnings.warn(
+    "elastic_dataloader.py is deprecated. Use 'from data_processing.processors import PipelineRunner' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
 import os
 import sys
 import argparse

@@ -29,7 +29,17 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
-        changeOrigin: true
+        changeOrigin: true,
+        // Configure proxy for SSE/streaming - disable buffering
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, req) => {
+            // For SSE endpoints, ensure no buffering
+            if (req.url?.includes('/stream')) {
+              proxyRes.headers['cache-control'] = 'no-cache'
+              proxyRes.headers['x-accel-buffering'] = 'no'
+            }
+          })
+        }
       }
     }
   },
