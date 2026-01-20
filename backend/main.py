@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
-from app.core.config import settings
+from app.core.config import settings, validate_required_settings
 from app.core.logging import setup_logging
 from app.api.v1.api import api_router
 from app.services.milvus_service import MilvusService
@@ -32,6 +32,14 @@ async def lifespan(app: FastAPI):
     logger = setup_logging()
     app.state.logger = logger
     app.state.logger.info("🚀 K8s Assistant starting...")
+    
+    # 验证必要配置
+    try:
+        validate_required_settings()
+        app.state.logger.info("✅ Configuration validated successfully")
+    except ValueError as e:
+        app.state.logger.error(f"❌ Configuration validation failed: {e}")
+        raise
     
     # 初始化所有服务
     try:

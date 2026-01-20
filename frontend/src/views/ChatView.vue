@@ -284,21 +284,23 @@ const formatMessage = (content: string) => {
 }
 
 // 展开/收起source的方法
-const toggleSourceExpansion = (messageId: string, sourceIndex: number) => {
-  if (!expandedSources.value[messageId]) {
-    expandedSources.value[messageId] = new Set()
+const toggleSourceExpansion = (messageId: string | number, sourceIndex: string | number) => {
+  const msgId = String(messageId)
+  const idx = Number(sourceIndex)
+  if (!expandedSources.value[msgId]) {
+    expandedSources.value[msgId] = new Set()
   }
   
-  const expandedSet = expandedSources.value[messageId]
-  if (expandedSet.has(sourceIndex)) {
-    expandedSet.delete(sourceIndex)
+  const expandedSet = expandedSources.value[msgId]
+  if (expandedSet.has(idx)) {
+    expandedSet.delete(idx)
   } else {
-    expandedSet.add(sourceIndex)
+    expandedSet.add(idx)
   }
 }
 
-const isSourceExpanded = (messageId: string, sourceIndex: number) => {
-  return expandedSources.value[messageId]?.has(sourceIndex) || false
+const isSourceExpanded = (messageId: string | number, sourceIndex: string | number) => {
+  return expandedSources.value[String(messageId)]?.has(Number(sourceIndex)) || false
 }
 
 // Watch message changes, auto scroll to bottom
