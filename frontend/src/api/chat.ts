@@ -1,9 +1,38 @@
 import axios from 'axios'
 import type { ChatRequest, ChatResponse, ChatHistoryResponse } from '@/types/chat'
 
+// 匿名用户 ID 管理
+const anonymous_user_id_key = 'anonymous_user_id'
+
+// 获取或创建匿名用户 ID
+export function getOrCreateAnonymousUserId(): string {
+  let anonymousId = localStorage.getItem(anonymous_user_id_key)
+  if (!anonymousId) {
+    // 生成新的匿名用户 ID
+    anonymousId = crypto.randomUUID()
+    localStorage.setItem(anonymous_user_id_key, anonymousId)
+  }
+  return anonymousId
+}
+
+// 获取认证token
+export function getAuthToken(): string | null {
+  return localStorage.getItem('auth_token')
+}
+
+// 设置认证token
+export function setAuthToken(token: string): void {
+  localStorage.setItem('auth_token', token)
+}
+
+// 清除认证token
+export function clearAuthToken(): void {
+  localStorage.removeItem('auth_token')
+}
+
 // 创建 axios 实例
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: '/api/v1',
   timeout: 120000, // 增加到2分钟，给LLM更多时间
   headers: {
     'Content-Type': 'application/json'
@@ -13,7 +42,17 @@ const api = axios.create({
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
-    // 可以在这里添加认证token等
+    // 添加认证 token
+    const token = getAuthToken()
+    if (token) {
+      config.headers = config.headers || {}
+      config.headers['Authorization'] = `Bearer ${token}`
+    } else {
+      // 添加匿名用户 ID
+      const anonymousId = getOrCreateAnonymousUserId()
+      config.headers = config.headers || {}
+      config.headers['X-Anonymous-User-ID'] = anonymousId
+    }
     return config
   },
   (error) => {
@@ -27,6 +66,10 @@ api.interceptors.response.use(
     return response.data
   },
   (error) => {
+    // 处理 401 未授权错误
+    if (error.response && error.response.status === 401) {
+      clearAuthToken()
+    }
     console.error('API Error:', error)
     return Promise.reject(error)
   }
@@ -43,20 +86,30 @@ export const chatAPI = {
   async sendMessageStream(request: ChatRequest): Promise<ReadableStream> {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 120000) // 2分钟超时
-    
+
     try {
-      const response = await fetch('/api/chat/stream', {
+      // Add auth headers
+      const token = getAuthToken()
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      }
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      } else {
+        const anonymousId = getOrCreateAnonymousUserId()
+        headers['X-Anonymous-User-ID'] = anonymousId
+      }
+
+      const response = await fetch('/api/v1/chat/stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream'
-        },
+        headers: headers,
         body: JSON.stringify(request),
         signal: controller.signal
       })
-      
+
       clearTimeout(timeoutId)
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
@@ -84,6 +137,74 @@ export const chatAPI = {
   }
 }
 
+// 用户认证API
+export const authAPI = {
+  // 用户注册
+  async register(data: {
+    username: string
+    email: string
+    password: string
+  }): Promise<{ id: string, username: string, email: string }> {
+    return api.post('/users/register', data)
+  },
+
+  // 用户登录
+  async login(username: string, password: string): Promise<any> {
+    const response = await api.post('/users/login', { username, password })
+    // 保存 token
+    if ((response as any).access_token) {
+      setAuthToken((response as any).access_token)
+      // 登录后合并匿名用户数据
+      const anonymousId = getOrCreateAnonymousUserId()
+      await this.mergeAnonymousUser(anonymousId)
+    }
+    return response
+  },
+
+  // 获取当前用户信息
+  async getCurrentUser(): Promise<any> {
+    return api.get('/users/me')
+  },
+
+  // 获取用户信息
+  async getUser(userId: string): Promise<any> {
+    return api.get(`/users/${userId}`)
+  },
+
+  // 更新用户资料
+  async updateUser(userId: string, data: {
+    username?: string
+    email?: string
+    password?: string
+  }): Promise<any> {
+    return api.put(`/users/${userId}`, data)
+  },
+
+  // 删除用户账户
+  async deleteUser(userId: string): Promise<any> {
+    const response = await api.delete(`/users/${userId}`)
+    clearAuthToken()
+    return response
+  },
+
+  // 合并匿名用户数据到登录用户
+  async mergeAnonymousUser(anonymousUserId: string): Promise<any> {
+    try {
+      return await api.post('/users/merge', { anonymous_user_id: anonymousUserId })
+    } catch (error) {
+      console.error('Merge failed:', error)
+      // 合并失败不影响登录，静默失败
+      return { message: 'Merge skipped' } as any
+    }
+  },
+
+  // 用户登出
+  async logout(): Promise<void> {
+    clearAuthToken()
+    // 不删除匿名用户 ID，保留本地历史
+  }
+}
+
 // 文档搜索API
 export const documentAPI = {
   // 搜索文档
@@ -97,7 +218,7 @@ export const documentAPI = {
   async uploadDocument(file: File) {
     const formData = new FormData()
     formData.append('file', file)
-    
+
     return api.post('/documents/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'

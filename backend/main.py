@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from app.core.config import settings, validate_required_settings
 from app.core.logging import setup_logging
 from app.api.v1.api import api_router
+from app.core.database import db_manager
 from app.services.milvus_service import MilvusService
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
@@ -43,6 +44,11 @@ async def lifespan(app: FastAPI):
     
     # 初始化所有服务
     try:
+        # 初始化数据库连接
+        app.state.logger.info("🔄 Initializing database connection...")
+        await db_manager.initialize()
+        app.state.logger.info("✅ Database connection initialized successfully")
+
         # 初始化 Milvus 服务
         app.state.milvus_service = MilvusService()
         await app.state.milvus_service.initialize()
@@ -74,6 +80,8 @@ async def lifespan(app: FastAPI):
     # 关闭时清理
     app.state.logger.info("🔄 Shutting down services...")
     
+    await db_manager.close()
+
     if hasattr(app.state, 'milvus_service'):
         await app.state.milvus_service.close()
     if hasattr(app.state, 'llm_service'):
@@ -102,13 +110,13 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+        allow_methods=settings.CORS_ALLOW_METHODS,
+        allow_headers=settings.CORS_ALLOW_HEADERS,
     )
     
     # 注册路由
-    app.include_router(api_router, prefix="/api")
+    app.include_router(api_router, prefix=settings.API_V1_STR)
     
     # 静态文件服务（仅当目录存在时挂载）
     static_dir = os.path.join(os.path.dirname(__file__), "static")

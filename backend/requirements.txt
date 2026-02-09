@@ -9,6 +9,12 @@ python-multipart==0.0.6
 pymilvus==2.6.1
 milvus-lite==2.5.1
 elasticsearch==9.1.1
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.23
+alembic==1.13.1
+redis==5.0.1
+asyncpg==0.29.0
+aioredis==2.0.1
 
 # 向量化和嵌入
 # --extra-index-url https://download.pytorch.org/whl/cpu
@@ -62,6 +68,8 @@ httpx==0.25.2
 aiofiles==23.2.1
 psutil==7.1.2
 onnx==1.19.1
+passlib[bcrypt]==1.7.4
+PyJWT==2.8.0
 
 # 日志和监控
 loguru==0.7.2
