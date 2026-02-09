@@ -106,15 +106,55 @@ services:
   #     timeout: 10s
   #     retries: 3
 
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: k8s-assistant-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: k8sassistant
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - k8s-assistant-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d k8sassistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: k8s-assistant-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - k8s-assistant-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # 后端 API 服务 (CPU 版本)
   backend:
     build:
-      context: ./backend
+      context: ../backend
       dockerfile: Dockerfile.cpu
       cache_from:
         - python:3.9-slim
     container_name: k8s-assistant-backend
     environment:
+      - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/k8sassistant
+      - REDIS_URL=redis://redis:6379/0
       - MILVUS_MODE=embedded
       - COLLECTION_NAME=k8s_docs
       - VECTOR_DIM=384
@@ -132,11 +172,16 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./models:/app/models
-      - ./hf_cache:/app/.cache/huggingface
-      - ./milvus_embedded_data:/app/milvus_data
+      - ../backend/data:/app/data
+      - ../backend/logs:/app/logs
+      - ../backend/models:/app/models
+      - ../backend/hf_cache:/app/.cache/huggingface
+      - ../backend/milvus_embedded_data:/app/milvus_data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     # 当使用嵌入式模式时，不需要依赖Milvus
     # depends_on:
     #   milvus:
@@ -145,18 +190,9 @@ services:
       - k8s-assistant-network
     restart: unless-stopped
 
-# volumes:
-  # 当使用standalone模式时，需要map下面的盘
-  # milvus_data:
-  #   driver: local
-  # milvus_logs:
-  #   driver: local
-  # minio_data:
-  #   driver: local
-  # pulsar_data:
-  #   driver: local
-  # pulsar_conf:
-  #   driver: local
+volumes:
+  postgres_data:
+  redis_data:
 
 
 networks:

@@ -38,10 +38,10 @@ export const useChatStore = defineStore('chat', () => {
       }
       messages.value.push(userMessage)
 
-      // 准备请求
+      // 准备请求 - only send conversationId if it's a valid UUID
       const request: ChatRequest = {
         message: content.trim(),
-        conversationId: currentConversationId.value,
+        conversationId: currentConversationId.value || undefined,
         context: messages.value.slice(-10), // 最近10条消息作为上下文
         temperature: 0.7,
         maxTokens: 2048
@@ -103,12 +103,15 @@ export const useChatStore = defineStore('chat', () => {
     }
     messages.value.push(assistantMessage)
 
-    // Update or create conversation
-    updateConversation(response.conversationId, response.content)
+    // Update or create conversation with user's message as title
+    updateConversation(response.conversationId, request.message)
   }
 
   const sendMessageStream = async (request: ChatRequest) => {
     isStreaming.value = true
+    
+    // Save user's message for title update
+    const userMessageContent = request.message
     
     try {
       const stream = await chatAPI.sendMessageStream(request)
@@ -184,7 +187,7 @@ export const useChatStore = defineStore('chat', () => {
         }
 
         if (eventType === 'done') {
-          updateConversation(conversationId, fullContent)
+          updateConversation(conversationId, userMessageContent)
           // Using an exception-free exit: we just mark a sentinel and let caller return
           throw new Error('__STREAM_DONE__')
         }
@@ -242,24 +245,92 @@ export const useChatStore = defineStore('chat', () => {
   const updateConversation = (conversationId: string, lastMessage: string) => {
     if (!currentConversation.value) {
       // Create new conversation
-      currentConversation.value = {
+      const newConversation: Conversation = {
         id: conversationId,
         title: lastMessage.slice(0, 50) + (lastMessage.length > 50 ? '...' : ''),
         messages: messages.value,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }
+      currentConversation.value = newConversation
+      // Add to conversations list
+      conversations.value.unshift(newConversation)
     } else {
       // Update existing conversation
+      // If title is "New Chat", update it with the user's first message
+      if (currentConversation.value.title === 'New Chat') {
+        currentConversation.value.title = lastMessage.slice(0, 50) + (lastMessage.length > 50 ? '...' : '')
+      }
+      
+      // Update conversation ID if it's a temporary ID
+      currentConversation.value.id = conversationId
       currentConversation.value.updatedAt = new Date().toISOString()
       currentConversation.value.messages = messages.value
+      
+      // Update in conversations list
+      const index = conversations.value.findIndex(c => c.id === conversationId || (currentConversation.value && c.id === currentConversation.value.id))
+      if (index !== -1) {
+        conversations.value[index] = currentConversation.value
+        // Move to top of list
+        conversations.value.splice(index, 1)
+        conversations.value.unshift(currentConversation.value)
+      }
+    }
+  }
+
+  const fetchConversations = async () => {
+    try {
+      const response = await chatAPI.getChatHistory()
+      conversations.value = response.conversations
+    } catch (error) {
+      console.error('Failed to fetch conversations:', error)
+    }
+  }
+
+  const deleteConversation = async (conversationId: string) => {
+    try {
+      await chatAPI.deleteConversation(conversationId)
+      // Remove from conversations list
+      conversations.value = conversations.value.filter(c => c.id !== conversationId)
+      // If deleted conversation was current, clear it
+      if (currentConversation.value?.id === conversationId) {
+        startNewConversation()
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error)
+      throw error
+    }
+  }
+
+  const refreshConversations = async () => {
+    await fetchConversations()
+    // Update current conversation if it exists in the list
+    if (currentConversation.value) {
+      const updated = conversations.value.find(c => c.id === currentConversation.value?.id)
+      if (updated) {
+        currentConversation.value = updated
+      }
     }
   }
 
   const startNewConversation = () => {
-    currentConversation.value = null
+    // Create a temporary new conversation with "New Chat" title
+    // Use empty string as temporary ID, will be replaced by backend UUID
+    const newConversation: Conversation = {
+      id: '', // Empty string indicates it's a new conversation not yet saved
+      title: 'New Chat',
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    
+    // Set as current conversation
+    currentConversation.value = newConversation
     messages.value = []
     error.value = null
+    
+    // Add to conversations list
+    conversations.value.unshift(newConversation)
   }
 
   const loadConversation = (conversation: Conversation) => {
@@ -294,6 +365,9 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     startNewConversation,
     loadConversation,
-    clearMessages
+    clearMessages,
+    fetchConversations,
+    deleteConversation,
+    refreshConversations
   }
 })

@@ -6,8 +6,9 @@ Backend 专属配置，基础能力配置复用 shared.config
 import os
 import sys
 from pathlib import Path
-from typing import List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 # 获取项目根目录
 ROOT_DIR = Path(__file__).parent.parent.parent.parent
@@ -30,6 +31,7 @@ class BackendSettings(BaseSettings):
     """
     
     # ============ 应用基本信息 ============
+    PROJECT_NAME: str = "K8s Assistant"
     APP_NAME: str = "K8s Assistant"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
@@ -38,11 +40,42 @@ class BackendSettings(BaseSettings):
     # ============ 服务器配置 ============
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    ENVIRONMENT: str = "development"  # "development" | "production"
+
+    # ============ CORS 配置 ============
+    # 从环境变量读取允许的跨域源
+    # .env 文件格式: CORS_ORIGINS=["http://localhost:3000"]
+    # 或者用逗号分隔: CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    CORS_ALLOW_CREDENTIALS: bool = True
+    CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "OPTIONS"]
+    CORS_ALLOW_HEADERS: List[str] = [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Accept",
+    ]
     
     # ============ 安全配置 ============
-    SECRET_KEY: str = "your-secret-key-here"
+    # SECRET_KEY: 必须从环境变量设置，不要使用默认值
+    # 生成方式: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    SECRET_KEY: str
+    ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    API_V1_STR: str = "/api/v1"
+    
+    # ============ 数据库配置 ============
+    # 请在下方设置您的数据库密码
+    DATABASE_URL: str = "postgresql+asyncpg://k8suser:pass@localhost:5432/k8sassistant"
+    REDIS_URL: str = "redis://localhost:6379/0"
+    
+    # ============ 缓存配置 ============
+    CACHE_TTL: int = 3600  # 缓存过期时间（秒）
+    MAX_CACHED_CHATS: int = 5  # 每个用户缓存的最大聊天数量
+    MAX_CACHED_MESSAGES: int = 20  # 每个聊天缓存的最大消息数量
     
     # ============ Elasticsearch 高级配置（Backend 专属） ============
     # 基础连接配置（HOST/INDEX/USER/PASSWORD/CA_CERTS）由 shared.config 管理
@@ -104,7 +137,94 @@ class BackendSettings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore"  # 忽略 shared config 管理的字段
     )
-    
+
+    # ============ 验证器 ============
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        """验证 SECRET_KEY 是否安全"""
+        # 检查长度（至少32字节/256位）
+        if len(v) < 32:
+            raise ValueError(
+                f"SECRET_KEY must be at least 32 characters long for security. "
+                f"Current length: {len(v)}. "
+                f"Generate a secure key with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+
+        # 检查是否使用了常见的默认值
+        insecure_defaults = [
+            "your-secret-key-here",
+            "your-super-secret-key-change-this-in-production",
+            "secret",
+            "password",
+            "secret-key",
+            "jwt-secret-key",
+        ]
+
+        v_lower = v.lower()
+        for insecure in insecure_defaults:
+            if insecure in v_lower:
+                raise ValueError(
+                    f"SECRET_KEY is using an insecure default value. "
+                    f"Please generate a secure key with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
+
+        return v
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        """解析 CORS_ORIGINS，支持字符串和列表格式"""
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            # 尝试解析 JSON 格式: ["http://a.com","http://b.com"]
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    pass
+            # 解析逗号分隔格式: http://a.com,http://b.com
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    @field_validator("CORS_ORIGINS")
+    @classmethod
+    def validate_cors_origins(cls, v: list[str], info) -> list[str]:
+        """验证 CORS 配置的安全性"""
+        # 获取环境配置
+        environment = info.data.get("ENVIRONMENT", "development")
+        allow_credentials = info.data.get("CORS_ALLOW_CREDENTIALS", True)
+
+        # 生产环境检查
+        if environment == "production":
+            for origin in v:
+                if "localhost" in origin or "127.0.0.1" in origin:
+                    raise ValueError(
+                        f"Production CORS_ORIGINS cannot contain localhost/127.0.0.1. Found: {origin}"
+                    )
+                # 生产环境推荐 HTTPS
+                if origin.startswith("http://") and origin not in ["http://localhost", "http://127.0.0.1"]:
+                    # 允许 localhost 的 HTTP，但警告生产环境应该用 HTTPS
+                    pass
+
+        # credentials 和通配符不能同时使用
+        if allow_credentials and "*" in v:
+            raise ValueError(
+                'Cannot use "*" in CORS_ORIGINS when CORS_ALLOW_CREDENTIALS=True'
+            )
+
+        # 验证每个 origin 格式
+        for origin in v:
+            if origin != "*":
+                if not (origin.startswith("http://") or origin.startswith("https://")):
+                    raise ValueError(
+                        f"Invalid CORS origin format: {origin}. Must start with http:// or https://"
+                    )
+
+        return v
+
     # ============ Shared Config 访问 ============
     @property
     def shared(self) -> SharedSettings:
@@ -210,11 +330,13 @@ settings = BackendSettings()
 def validate_required_settings():
     """
     验证必要的配置
-    
+
     注意：此函数应在应用启动时调用（如 FastAPI lifespan），
     而不是在模块导入时立即执行，以便 shared 模块可以被安全导入。
     """
     shared = get_shared_settings()
+
+    # 验证 LLM_API_KEY
     if not shared.LLM_API_KEY:
         env_file_path = ROOT_DIR / ".env"
         error_msg = f"""
@@ -227,6 +349,24 @@ LLM_API_KEY must be set. Please check:
 To fix this, either:
 - Set the environment variable: export LLM_API_KEY=your-api-key
 - Create a .env file in the project root with: LLM_API_KEY=your-api-key
+"""
+        raise ValueError(error_msg)
+
+    # 验证 SECRET_KEY
+    secret_key = os.getenv("SECRET_KEY")
+    if not secret_key:
+        env_file_path = ROOT_DIR / ".env"
+        error_msg = f"""
+SECRET_KEY must be set in .env file or environment variable for security.
+
+Current value: {os.getenv('SECRET_KEY', 'NOT_SET')}
+.env file location: {env_file_path}
+
+To generate a secure SECRET_KEY, run:
+  python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+Then add it to your .env file:
+  SECRET_KEY=<generated-key>
 """
         raise ValueError(error_msg)
 

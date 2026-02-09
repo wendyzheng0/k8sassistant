@@ -4,8 +4,8 @@
     <div class="sidebar">
       <div class="sidebar-header">
         <h2>K8s Assistant</h2>
-        <el-button 
-          type="primary" 
+        <el-button
+          type="primary"
           @click="startNewChat"
           :icon="Plus"
           size="small"
@@ -13,7 +13,7 @@
           新对话
         </el-button>
       </div>
-      
+
       <!-- Navigation -->
       <div class="sidebar-nav">
         <router-link to="/admin" class="nav-link">
@@ -21,20 +21,53 @@
           <span>向量数据库管理</span>
         </router-link>
       </div>
-      
+
+      <!-- User Menu / Login Button -->
+      <div class="user-menu-container">
+        <UserMenu v-if="userStore.isAuthenticated" />
+        <div class="login-button" v-else>
+          <el-button
+            type="primary"
+            @click="showLoginDialog"
+            size="small"
+            circle
+          >
+            <el-icon><User /></el-icon>
+          </el-button>
+        </div>
+      </div>
+
       <div class="sidebar-content">
+        <div v-if="conversations.length === 0" class="empty-conversations">
+          <el-icon size="48" color="#c0c4cc"><ChatDotRound /></el-icon>
+          <p>暂无对话记录</p>
+        </div>
         <el-menu
+          v-else
           :default-active="currentConversationId"
           class="conversation-list"
         >
-          <el-menu-item 
-            v-for="conversation in conversations" 
+          <el-menu-item
+            v-for="conversation in conversations"
             :key="conversation.id"
             :index="conversation.id"
             @click="loadConversation(conversation)"
           >
-            <el-icon><ChatDotRound /></el-icon>
-            <span>{{ conversation.title }}</span>
+            <div class="conversation-item">
+              <div class="conversation-info">
+                <el-icon><ChatDotRound /></el-icon>
+                <span class="conversation-title">{{ conversation.title }}</span>
+              </div>
+              <el-button
+                type="danger"
+                :icon="Delete"
+                size="small"
+                text
+                circle
+                @click.stop="handleDeleteConversation(conversation.id)"
+                class="delete-btn"
+              />
+            </div>
           </el-menu-item>
         </el-menu>
       </div>
@@ -49,8 +82,8 @@
           <h3>欢迎使用 K8s 智能助手</h3>
           <p>我可以帮助您解答 Kubernetes 相关的问题</p>
           <div class="example-questions">
-            <el-button 
-              v-for="question in exampleQuestions" 
+            <el-button
+              v-for="question in exampleQuestions"
               :key="question"
               @click="sendExampleQuestion(question)"
               size="small"
@@ -63,13 +96,13 @@
         </div>
 
         <div v-else class="messages-list">
-          <div 
-            v-for="message in messages" 
+          <div
+            v-for="message in messages"
             :key="message.id"
             :class="['message', `message-${message.role}`]"
           >
             <div class="message-avatar">
-              <el-avatar 
+              <el-avatar
                 :icon="message.role === 'user' ? User : Service"
                 :size="32"
               />
@@ -84,18 +117,18 @@
                 </span>
               </div>
               <div class="message-text" v-html="formatMessage(message.content)"></div>
-              
+
               <!-- Show sources -->
               <div v-if="message.metadata?.sources?.length" class="message-sources">
                 <div class="sources-header">
                   <span class="sources-title">参考来源</span>
                 </div>
-                <div 
-                  v-for="(source, index) in message.metadata.sources" 
+                <div
+                  v-for="(source, index) in message.metadata.sources"
                   :key="source.title"
                   class="source-item"
                 >
-                  <div 
+                  <div
                     class="source-header"
                     @click="toggleSourceExpansion(message.id, index)"
                   >
@@ -103,9 +136,9 @@
                       <el-icon class="expand-icon" :class="{ 'expanded': isSourceExpanded(message.id, index) }">
                         <ArrowRight />
                       </el-icon>
-                      <el-link 
-                        v-if="source.url" 
-                        :href="source.url" 
+                      <el-link
+                        v-if="source.url"
+                        :href="source.url"
                         target="_blank"
                         type="primary"
                         @click.stop
@@ -118,8 +151,8 @@
                       相关度: {{ (source.score * 100).toFixed(1) }}%
                     </el-tag>
                   </div>
-                  <div 
-                    v-if="isSourceExpanded(message.id, index)" 
+                  <div
+                    v-if="isSourceExpanded(message.id, index)"
                     class="source-content"
                   >
                     <div class="source-content-text">{{ source.content }}</div>
@@ -181,23 +214,31 @@
         </div>
       </div>
     </div>
+
+    <!-- Login Dialog -->
+    <LoginDialog ref="loginDialogRef" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
-import { 
-  Plus, 
-  ChatDotRound, 
-  User, 
-  Service, 
-  Loading, 
-  Promotion, 
+import {
+  Plus,
+  ChatDotRound,
+  User,
+  Service,
+  Loading,
+  Promotion,
   VideoPlay,
   ArrowRight,
-  Setting
+  Setting,
+  Delete
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import LoginDialog from '@/components/LoginDialog.vue'
+import UserMenu from '@/components/UserMenu.vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useChatStore } from '@/stores/chat'
 import type { Conversation } from '@/types/chat'
@@ -206,6 +247,8 @@ import type { Conversation } from '@/types/chat'
 const chatStore = useChatStore()
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement>()
+const loginDialogRef = ref<InstanceType<typeof LoginDialog>>()
+const userStore = useUserStore()
 
 // 展开状态管理
 const expandedSources = ref<Record<string, Set<number>>>({})
@@ -227,15 +270,41 @@ const isStreaming = computed(() => chatStore.isStreaming)
 const currentConversationId = computed(() => chatStore.currentConversationId)
 const conversations = computed(() => chatStore.conversations)
 
+// Helper functions
+const scrollToBottom = async () => {
+  await nextTick()
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
+const formatTime = (timestamp: string) => {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 // Methods
 const handleSend = async () => {
   if (!inputMessage.value.trim() || isLoading.value) return
-  
+
   const message = inputMessage.value
   inputMessage.value = ''
-  
+
   await chatStore.sendMessage(message, false)
   scrollToBottom()
+}
+
+const showLoginDialog = () => {
+  if (userStore.isAuthenticated) {
+    // User is already logged in, show logout confirmation or do nothing
+    console.log('User is already logged in')
+  } else {
+    if (loginDialogRef.value) {
+      loginDialogRef.value.show()
+    }
+  }
 }
 
 const handleStreamSend = async () => {
@@ -259,26 +328,54 @@ const startNewChat = () => {
 
 const loadConversation = (conversation: Conversation) => {
   chatStore.loadConversation(conversation)
+  scrollToBottom()
 }
 
-const scrollToBottom = async () => {
-  await nextTick()
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+const handleDeleteConversation = async (conversationId: string) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这个对话吗？', '删除确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await chatStore.deleteConversation(conversationId)
+    ElMessage.success('对话已删除')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除对话失败')
+    }
   }
 }
 
-const formatTime = (timestamp: string) => {
-  return new Date(timestamp).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
+/**
+ * 格式化消息内容，使用 DOMPurify 防止 XSS 攻击
+ * 1. 将 Markdown 转换为 HTML
+ * 2. 使用 DOMPurify 清理危险标签和属性
+ */
 const formatMessage = (content: string) => {
   try {
-    return marked(content)
+    // 将 Markdown 转换为 HTML（使用同步模式）
+    const html = marked.parse(content) as string
+    // 使用 DOMPurify 清理 HTML，移除危险标签和属性
+    return DOMPurify.sanitize(html, {
+      // 允许的标签（Markdown 常用标签）
+      ALLOWED_TAGS: [
+        'p', 'br', 'strong', 'em', 'code', 'pre',
+        'a', 'ul', 'ol', 'li', 'blockquote', 'hr',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+        'del', 's', 'sub', 'sup'
+      ],
+      // 允许的属性
+      ALLOWED_ATTR: ['href', 'title', 'class', 'target'],
+      // 禁止 data:* 属性
+      ALLOW_DATA_ATTR: false,
+      // 禁止 JavaScript 协议的链接
+      ALLOW_UNKNOWN_PROTOCOLS: false,
+    })
   } catch {
+    // 如果转换失败，返回纯文本内容
     return content
   }
 }
@@ -308,8 +405,10 @@ watch(messages, () => {
   scrollToBottom()
 }, { deep: true })
 
-// Scroll to bottom after component mount
-onMounted(() => {
+// Scroll to bottom after component mount and fetch conversations
+onMounted(async () => {
+  // Fetch conversation history on mount
+  await chatStore.fetchConversations()
   scrollToBottom()
 })
 </script>
@@ -374,8 +473,56 @@ onMounted(() => {
   overflow-y: auto;
 }
 
+.empty-conversations {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: #c0c4cc;
+  text-align: center;
+}
+
+.empty-conversations p {
+  margin: 16px 0 0;
+  font-size: 14px;
+}
+
 .conversation-list {
   border: none;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+}
+
+.conversation-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.delete-btn {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.el-menu-item:hover .delete-btn {
+  opacity: 1;
 }
 
 .main-content {
@@ -578,12 +725,24 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
+.login-button {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+}
+
+.user-menu-container {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .sidebar {
     display: none;
   }
-  
+
   .message-content {
     max-width: 85%;
   }

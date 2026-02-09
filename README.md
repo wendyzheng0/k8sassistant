@@ -87,9 +87,6 @@ K8s Assistant 是一个全栈的智能问答系统，集成了大语言模型和
   - BeautifulSoup4 4.13.5
   - html2text 2025.4.15
   - LlamaIndex 0.13.4
-- **数据处理**: 
-  - scikit-learn 1.3.2 (机器学习)
-  - SciPy 1.11.4 (科学计算)
 
 ### 前端技术
 - **核心框架**: Vue 3.3.8

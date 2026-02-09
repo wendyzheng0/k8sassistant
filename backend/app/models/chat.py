@@ -131,7 +131,6 @@ class ChatHistoryResponse(BaseModel):
             }
         }
     )
-
     conversations: List[Conversation] = Field(..., description="对话列表")
     total: int = Field(..., description="总数")
     page: int = Field(default=1, description="当前页码")
